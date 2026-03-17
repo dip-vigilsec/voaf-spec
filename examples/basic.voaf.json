@@ -1,0 +1,97 @@
+[
+  {
+    "voaf": "1.0.0",
+    "id": "evt_01J7K9X2M3N4P5Q6R7S8T9U0V1",
+    "timestamp": "2026-03-17T12:00:00.000Z",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "direction": "request",
+    "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "gate_decision": "ALLOW",
+    "session_id": "sess_abc123",
+    "user_id": "user_anon_7f3a",
+    "device_id": "dev_macbook_01",
+    "token_count": {
+      "input": 142,
+      "output": 0
+    },
+    "tags": ["code-generation", "python"],
+    "annotations": {
+      "app": "cursor",
+      "workspace": "my-project"
+    }
+  },
+  {
+    "voaf": "1.0.0",
+    "id": "evt_01J7K9X2M3N4P5Q6R7S8T9U0V2",
+    "timestamp": "2026-03-17T12:00:01.340Z",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "direction": "response",
+    "content_hash": "sha256:a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+    "prev_hash": "sha256:bf718b6e9d5414b2e5a1a1f92c5e8d6b3f4c0a1d2e3f4a5b6c7d8e9f0a1b2c3d",
+    "gate_decision": "ALLOW",
+    "session_id": "sess_abc123",
+    "user_id": "user_anon_7f3a",
+    "device_id": "dev_macbook_01",
+    "token_count": {
+      "input": 142,
+      "output": 287
+    },
+    "latency_ms": 1340,
+    "tags": ["code-generation", "python"]
+  },
+  {
+    "voaf": "1.0.0",
+    "id": "evt_01J7K9X2M3N4P5Q6R7S8T9U0V3",
+    "timestamp": "2026-03-17T12:01:15.000Z",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "direction": "request",
+    "content_hash": "sha256:d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592",
+    "prev_hash": "sha256:c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2",
+    "gate_decision": "BLOCK",
+    "gate_reason": "Prompt injection detected: instruction discard pattern 'ignore previous instructions'",
+    "gate_policy_id": "sig_instruction_discard_001",
+    "gate_layer": 1,
+    "session_id": "sess_abc123",
+    "user_id": "user_anon_7f3a",
+    "device_id": "dev_macbook_01",
+    "token_count": {
+      "input": 89,
+      "output": 0
+    },
+    "tags": ["blocked", "injection-attempt"],
+    "decomposition": {
+      "intent": "prompt_injection",
+      "entities": [
+        {
+          "type": "injection_pattern",
+          "value": "ignore previous instructions",
+          "confidence": 0.97
+        }
+      ],
+      "risk_score": 0.95,
+      "categories": ["instruction_discard", "prompt_injection"]
+    }
+  },
+  {
+    "voaf": "1.0.0",
+    "id": "evt_01J7K9X2M3N4P5Q6R7S8T9U0V4",
+    "timestamp": "2026-03-17T12:05:30.000Z",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "direction": "request",
+    "content_hash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "prev_hash": "sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+    "gate_decision": "FLAG",
+    "gate_reason": "Elevated agency language detected: 'execute the following commands on my behalf'",
+    "gate_policy_id": "agency_prescorer_002",
+    "gate_layer": 3,
+    "session_id": "sess_def456",
+    "user_id": "user_anon_7f3a",
+    "device_id": "dev_macbook_01",
+    "tags": ["flagged", "agency-elevated"]
+  }
+]

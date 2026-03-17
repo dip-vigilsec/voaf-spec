@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VOAF — Vigil Open Audit Format</title>
+  <meta name="description" content="VOAF is an open, vendor-neutral JSON format for cryptographically verifiable AI interaction audit trails.">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --border: #1e1e2e;
+      --text: #e0e0e8;
+      --muted: #8888a0;
+      --accent: #6c5ce7;
+      --accent-light: #a29bfe;
+      --green: #00b894;
+      --red: #e17055;
+      --orange: #fdcb6e;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    nav {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+    }
+    nav .container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    nav .logo {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.5px;
+    }
+    nav .logo span { color: var(--accent-light); }
+    nav .links a {
+      color: var(--muted);
+      text-decoration: none;
+      margin-left: 24px;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+    nav .links a:hover { color: var(--text); }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+    }
+    .hero .badge {
+      display: inline-block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 13px;
+      color: var(--accent-light);
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+    .hero h1 .highlight { color: var(--accent-light); }
+    .hero p {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto 32px;
+    }
+    .hero .cta {
+      display: inline-flex;
+      gap: 12px;
+    }
+    .hero .cta a {
+      display: inline-block;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: #5b4bd6; }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--muted); }
+
+    /* Code block */
+    .code-section {
+      padding: 0 0 60px;
+    }
+    .code-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .code-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .code-header .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .code-header .dot.green { background: var(--green); }
+    .code-header .dot.red { background: var(--red); }
+    .code-header .dot.orange { background: var(--orange); }
+    pre {
+      padding: 20px;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      overflow-x: auto;
+      color: var(--text);
+    }
+    .json-key { color: var(--accent-light); }
+    .json-string { color: var(--green); }
+    .json-number { color: var(--orange); }
+
+    /* Features */
+    .features {
+      padding: 60px 0;
+    }
+    .features h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 40px;
+      text-align: center;
+      letter-spacing: -0.5px;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .feature h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* How it works */
+    .how-it-works {
+      padding: 60px 0;
+    }
+    .how-it-works h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 40px;
+      text-align: center;
+      letter-spacing: -0.5px;
+    }
+    .chain {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .chain-entry {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      text-align: center;
+      min-width: 140px;
+    }
+    .chain-entry .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .chain-entry .hash {
+      font-family: 'SF Mono', monospace;
+      font-size: 11px;
+      color: var(--accent-light);
+    }
+    .chain-entry.allow { border-color: var(--green); }
+    .chain-entry.block { border-color: var(--red); }
+    .chain-entry.flag { border-color: var(--orange); }
+    .chain-arrow {
+      font-size: 20px;
+      color: var(--muted);
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    footer a { color: var(--accent-light); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 32px; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .chain { flex-direction: column; }
+      .chain-arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="https://vigilsec.ai" class="logo">vigil<span>sec</span></a>
+    <div class="links">
+      <a href="https://github.com/vigilsec/voaf-spec">GitHub</a>
+      <a href="https://github.com/vigilsec/voaf-spec/blob/main/schema/voaf-v1.0.schema.json">Schema</a>
+      <a href="https://github.com/vigilsec/voaf-spec/blob/main/examples/basic.voaf.json">Examples</a>
+      <a href="https://github.com/vigilsec/vigil">Vigil</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container">
+    <div class="badge">v1.0.0 &mdash; Open Standard &mdash; Apache 2.0</div>
+    <h1>Vigil Open <span class="highlight">Audit Format</span></h1>
+    <p>A vendor-neutral JSON format for cryptographically verifiable AI interaction audit trails. Know what went in. Know what came out. Prove it.</p>
+    <div class="cta">
+      <a href="https://github.com/vigilsec/voaf-spec" class="btn-primary">View on GitHub</a>
+      <a href="https://github.com/vigilsec/voaf-spec/blob/main/schema/voaf-v1.0.schema.json" class="btn-secondary">Read the Schema</a>
+    </div>
+  </div>
+</section>
+
+<section class="code-section">
+  <div class="container">
+    <div class="code-block">
+      <div class="code-header">
+        <span class="dot green"></span>
+        <span class="dot orange"></span>
+        <span class="dot red"></span>
+        basic.voaf.json
+      </div>
+      <pre>{
+  <span class="json-key">"voaf"</span>: <span class="json-string">"1.0.0"</span>,
+  <span class="json-key">"id"</span>: <span class="json-string">"evt_01J7K9X2..."</span>,
+  <span class="json-key">"timestamp"</span>: <span class="json-string">"2026-03-17T12:00:00.000Z"</span>,
+  <span class="json-key">"provider"</span>: <span class="json-string">"openai"</span>,
+  <span class="json-key">"model"</span>: <span class="json-string">"gpt-4o"</span>,
+  <span class="json-key">"direction"</span>: <span class="json-string">"request"</span>,
+  <span class="json-key">"content_hash"</span>: <span class="json-string">"sha256:e3b0c442..."</span>,
+  <span class="json-key">"prev_hash"</span>: <span class="json-string">"sha256:00000000..."</span>,
+  <span class="json-key">"gate_decision"</span>: <span class="json-string">"ALLOW"</span>
+}</pre>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="container">
+    <h2>Why VOAF?</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>Tamper-Evident Hash Chain</h3>
+        <p>Every entry includes a SHA-256 hash of the previous entry. Break one link, the whole chain screams. Append-only by design.</p>
+      </div>
+      <div class="feature">
+        <h3>Provider Agnostic</h3>
+        <p>Works with OpenAI, Anthropic, Google, Cohere, open-source models &mdash; any HTTP-based AI API. No vendor lock-in.</p>
+      </div>
+      <div class="feature">
+        <h3>Gate Decisions are First-Class</h3>
+        <p>ALLOW, BLOCK, and FLAG decisions are built into the schema. Blocked requests stay in the audit trail &mdash; you see what was stopped and why.</p>
+      </div>
+      <div class="feature">
+        <h3>Minimal by Default</h3>
+        <p>Only 8 required fields per entry. Everything else &mdash; session tracking, decomposition, token counts &mdash; is optional. Start simple, extend as needed.</p>
+      </div>
+      <div class="feature">
+        <h3>Privacy-Preserving</h3>
+        <p>Store content hashes without raw content. Prove what happened without exposing what was said. Full content is always optional.</p>
+      </div>
+      <div class="feature">
+        <h3>Machine &amp; Human Readable</h3>
+        <p>JSON schema with formal validation. Pipe it into your SIEM, render it in a dashboard, or read it in a text editor.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="how-it-works">
+  <div class="container">
+    <h2>Hash Chain in Action</h2>
+    <div class="chain">
+      <div class="chain-entry allow">
+        <div class="label">Genesis &bull; Allow</div>
+        <div class="hash">prev: 0000...0000</div>
+      </div>
+      <div class="chain-arrow">&rarr;</div>
+      <div class="chain-entry allow">
+        <div class="label">Response &bull; Allow</div>
+        <div class="hash">prev: bf71...2c3d</div>
+      </div>
+      <div class="chain-arrow">&rarr;</div>
+      <div class="chain-entry block">
+        <div class="label">Request &bull; Block</div>
+        <div class="hash">prev: c3d2...c3d2</div>
+      </div>
+      <div class="chain-arrow">&rarr;</div>
+      <div class="chain-entry flag">
+        <div class="label">Request &bull; Flag</div>
+        <div class="hash">prev: 1a2b...1a2b</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>VOAF is maintained by <a href="https://vigilsec.ai">Vigil Security</a> and the open-source community.</p>
+    <p style="margin-top: 8px;">Apache 2.0 &mdash; <a href="https://github.com/vigilsec/voaf-spec">GitHub</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
