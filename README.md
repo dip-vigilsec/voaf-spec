@@ -122,7 +122,7 @@ Canonical JSON is produced by serializing with sorted keys and no whitespace. An
 
 | Project | Language | Description |
 |---|---|---|
-| [Vigil](https://github.com/vigilsec/vigil) | Rust | Reference implementation — local AI security proxy with native VOAF export |
+| [Vigil](https://github.com/dip-vigilsec/vigil) | Rust | Reference implementation — local AI security proxy with native VOAF export |
 
 Want to add your implementation? Open a PR.
 

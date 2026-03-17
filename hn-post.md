@@ -2,7 +2,7 @@
 
 **Title:** Show HN: VOAF – Open standard for cryptographically verifiable AI audit trails
 
-**URL:** https://github.com/vigilsec/voaf-spec
+**URL:** https://github.com/dip-vigilsec/voaf-spec
 
 **Text:**
 
@@ -24,6 +24,6 @@ The schema is formally specified as JSON Schema 2020-12, with examples and valid
 
 We think any AI gateway, proxy, or agent framework could benefit from a shared audit format — especially as AI compliance requirements start appearing. Happy to hear feedback on the schema design.
 
-GitHub: https://github.com/vigilsec/voaf-spec
+GitHub: https://github.com/dip-vigilsec/voaf-spec
 Landing page: https://vigilsec.ai/voaf
-Schema: https://github.com/vigilsec/voaf-spec/blob/main/schema/voaf-v1.0.schema.json
+Schema: https://github.com/dip-vigilsec/voaf-spec/blob/main/schema/voaf-v1.0.schema.json
