@@ -1,6 +1,12 @@
 # VOAF — Vigil Open Audit Format
 
-**Version 1.0.0** | [Schema](schema/voaf-v1.0.schema.json) | [Examples](examples/) | [Changelog](CHANGELOG.md)
+**Version 2.0.0** | [Preimage spec](spec/2.0/preimage.md) | [Test vectors](spec/2.0/test-vectors.json) | [Changelog](CHANGELOG.md)
+
+> **2.0 covers message content. 1.0 did not.**
+> The 1.0 preimage hashed `prev_hash || id || timestamp || features_json`, so a
+> 1.0 chain proves a record existed in an order, not what it said. A 2.x verifier
+> reads a 1.0 document in link-only mode and says so rather than reporting it as
+> verified. See the [changelog](CHANGELOG.md) for the full account.
 
 VOAF is an open, vendor-neutral JSON format for recording AI interaction audit trails. It provides a cryptographically verifiable, append-only log of every request and response between humans and AI systems — including metadata for policy decisions, anomaly flags, and blocked interactions.
 
