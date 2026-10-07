@@ -1,6 +1,6 @@
 # VOAF — Vigil Open Audit Format
 
-**Version 2.0.0** | [Preimage spec](spec/2.0/preimage.md) | [Test vectors](spec/2.0/test-vectors.json) | [Changelog](CHANGELOG.md)
+**Version 2.1.0** | [Preimage spec](spec/2.0/preimage.md) | [Test vectors](spec/2.0/test-vectors.json) | [Changelog](CHANGELOG.md)
 
 > **2.0 covers message content. 1.0 did not.**
 > The 1.0 preimage hashed `prev_hash || id || timestamp || features_json`, so a

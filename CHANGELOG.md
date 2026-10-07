@@ -5,6 +5,50 @@ All notable changes to the VOAF specification will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-10-07
+
+Minor. No preimage byte changes and the format tag stays `voaf-2.0`, so every
+2.0.0 document and vector verifies unchanged.
+
+### Added
+
+- Two `gate_decision.decision` values, `shutdown_deny` and `connection_panicked`
+  (`spec/2.0/preimage.md` section 4.7.1). Each records a held call that no person
+  decided. In both, the held call was not delivered to the client.
+  - `shutdown_deny`: the producer denied an open hold because it was shutting
+    down, and wrote deny text in place of the call. Introduced in Vigil commit
+    `ab2da26`.
+  - `connection_panicked`: the task serving the connection failed while the hold
+    was open, and the connection supervisor recorded the hold. Nothing was
+    delivered. Introduced in Vigil commit `5fd9c39`.
+
+  First written by Vigil 2.3.2. No tagged release before 2.3.2 writes either value.
+- Section 7: a verifier MUST NOT count or present an unrecognised `decision` as an
+  allow, and SHOULD report such records with the raw value.
+- Section 7.1: adding a `decision` value is a minor change. Removing one, or
+  changing its meaning, is a major change.
+- Six positive vectors, one for each `decision` value no earlier vector carried:
+  `shutdown_deny`, `connection_panicked`, `timeout_deny`, `user_approve`,
+  `always_allow` and `restore`. Two negative vectors: a NULL `decision`, and a
+  `decision` edited without re-hashing. 24 vectors and 6 negative vectors in all.
+
+### Fixed
+
+- `spec/2.0/reference-verifier.rs` rejects a NULL `decision`, per section 7 rule 1.
+  It used to encode the one-byte NULL marker, so the record verified. A missing
+  `decision` already failed.
+
+### Changed
+
+- Section 4.4: `connection_panicked`, like `client_disconnected`, carries a NULL
+  `response_hash_delivered`, and it also carries a NULL `response_hash_upstream`.
+
+### Compatibility
+
+- A 2.0.0 verifier still verifies records carrying either new value, because
+  section 7 rule 2 makes an unknown token not a failure. 2.0.0 did not say what a
+  verifier may do with such a record. The section 7 addition does.
+
 ## [2.0.0] - 2026-09-02
 
 Major. A 2.x verifier reads a 1.0 document in link-only mode and states that

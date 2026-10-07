@@ -1,7 +1,8 @@
 {
   "spec": "VOAF 2.0 preimage test vectors",
-  "revision": 3,
+  "revision": 4,
   "supersedes": "revisions 1 and 2. Revision 1 had three proven collision classes. Revision 2 typed the NULL marker; the owner ruled NULL stays one byte and criterion 4 is reworded instead.",
+  "revision_4": "Spec release 2.1.0. Adds six positive gate_decision vectors, one for every decision token no earlier vector carried (shutdown_deny, connection_panicked, timeout_deny, user_approve, always_allow, restore), and two negative vectors: a null decision and a decision edited without re-hashing. Every revision 3 vector and the chain are unchanged.",
   "generated_for": "docs/specs/voaf-2.0-preimage.md",
   "hash": "sha256",
   "repeat_directive": {
@@ -933,6 +934,236 @@
       "preimage_len": 250,
       "expected_hash": "2ff007af9b4a348451b6028259bbceceba652ce62d19b324b0e937100857e196",
       "preimage_hex": "0100000008766f61662d322e3002000000023131020000000130010000004036616132383830653134653261393263623538313365613261383234323163646262313736393632393437363437613239323032643436346134383535626264010000000d636861696e5f75706772616465010000001a30314a51303030303030303030303030303030303030303046450200000010313735303338353839303030303030300100000003322e300002000000023131010000004065656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565"
+    },
+    {
+      "name": "gate_decision_shutdown_deny",
+      "event_kind": "gate_decision",
+      "note": "Revision 4. The producer was shutting down with this hold open, so it denied the hold itself. It wrote deny text in place of the call, the same substitution as user_deny, so both response hashes are present and differ. Not a person's deny, and not an allow. Section 4.7.1.",
+      "chain_member": false,
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ00000000000000000000SD",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": "01JQ0000000000000000000002",
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": "shutdown_deny",
+        "held_ms": 2150,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "response_hash_delivered": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "preimage_sha256": "ce28c41c94a6a22f4c17e84590f7ae6f1e0e314fa00bccb88b17d06d62215030",
+      "preimage_len": 538,
+      "expected_hash": "ce28c41c94a6a22f4c17e84590f7ae6f1e0e314fa00bccb88b17d06d62215030",
+      "preimage_hex": "0100000008766f61662d322e3002000000023233020000000139010000004064666164646639633633383837303863326130306161323733643734346166663665316164363930346330353639363138373239633864363632336266313537010000000d676174655f6465636973696f6e010000001a30314a5130303030303030303030303030303030303030305344020000001031373530333835383939303030303030010000000467642d32010000001a30314a51303030303030303030303030303030303030303030320100000009616e7468726f7069630100000019616e7468726f7069632d6d657373616765732d73747265616d010000000b746f6f6c755f3031414243010000000462617368010000000c697272657665727369626c6504000000020100000005522d3030330100000005522d3031310100000004686f6c64010000000d73687574646f776e5f64656e7902000000043231353004000000020100000006736e61702d610100000006736e61702d62010000004062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262010000004063636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363010000000a766967696c2d67617465010000000131"
+    },
+    {
+      "name": "gate_decision_connection_panicked",
+      "event_kind": "gate_decision",
+      "note": "Revision 4. The task serving the connection failed while this hold was open and undecided, and the producer's connection supervisor recorded the hold. Nothing was delivered for the call, and the supervisor holds neither response hash, so both are NULL, as is interaction_id. Section 4.7.1.",
+      "chain_member": false,
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ00000000000000000000CP",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": null,
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": "connection_panicked",
+        "held_ms": 8000,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": null,
+        "response_hash_delivered": null,
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "preimage_sha256": "f07cc2f529aafed83a5634efa79df5ecdca75d5f7454b6dc2bd43936195f31b8",
+      "preimage_len": 378,
+      "expected_hash": "f07cc2f529aafed83a5634efa79df5ecdca75d5f7454b6dc2bd43936195f31b8",
+      "preimage_hex": "0100000008766f61662d322e3002000000023233020000000139010000004064666164646639633633383837303863326130306161323733643734346166663665316164363930346330353639363138373239633864363632336266313537010000000d676174655f6465636973696f6e010000001a30314a5130303030303030303030303030303030303030304350020000001031373530333835383939303030303030010000000467642d32000100000009616e7468726f7069630100000019616e7468726f7069632d6d657373616765732d73747265616d010000000b746f6f6c755f3031414243010000000462617368010000000c697272657665727369626c6504000000020100000005522d3030330100000005522d3031310100000004686f6c640100000013636f6e6e656374696f6e5f70616e69636b656402000000043830303004000000020100000006736e61702d610100000006736e61702d620000010000000a766967696c2d67617465010000000131"
+    },
+    {
+      "name": "gate_decision_timeout_deny",
+      "event_kind": "gate_decision",
+      "note": "Revision 4. No decision arrived within the hold window. The timeout deny text differs from the user_deny text, so the delivered hash differs from both the upstream hash and the one in gate_decision_deny.",
+      "chain_member": false,
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ00000000000000000000TD",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": "01JQ0000000000000000000002",
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": "timeout_deny",
+        "held_ms": 30000,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "response_hash_delivered": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "preimage_sha256": "aeb0783e7f15917997fde8d71456f9139c5cb44a8a7bfa03e3466323d45da13a",
+      "preimage_len": 538,
+      "expected_hash": "aeb0783e7f15917997fde8d71456f9139c5cb44a8a7bfa03e3466323d45da13a",
+      "preimage_hex": "0100000008766f61662d322e3002000000023233020000000139010000004064666164646639633633383837303863326130306161323733643734346166663665316164363930346330353639363138373239633864363632336266313537010000000d676174655f6465636973696f6e010000001a30314a5130303030303030303030303030303030303030305444020000001031373530333835383939303030303030010000000467642d32010000001a30314a51303030303030303030303030303030303030303030320100000009616e7468726f7069630100000019616e7468726f7069632d6d657373616765732d73747265616d010000000b746f6f6c755f3031414243010000000462617368010000000c697272657665727369626c6504000000020100000005522d3030330100000005522d3031310100000004686f6c64010000000c74696d656f75745f64656e790200000005333030303004000000020100000006736e61702d610100000006736e61702d62010000004062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262010000004064646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464010000000a766967696c2d67617465010000000131"
+    },
+    {
+      "name": "gate_decision_user_approve",
+      "event_kind": "gate_decision",
+      "note": "Revision 4. A person approved the held call. An approved call is replayed byte for byte, so the delivered hash equals the upstream hash.",
+      "chain_member": false,
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ00000000000000000000AP",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": "01JQ0000000000000000000002",
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": "user_approve",
+        "held_ms": 6100,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "response_hash_delivered": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "preimage_sha256": "391d3f285f080eb8b74fbd44adeea336887b07cf2a0e259315d2867ef49be887",
+      "preimage_len": 537,
+      "expected_hash": "391d3f285f080eb8b74fbd44adeea336887b07cf2a0e259315d2867ef49be887",
+      "preimage_hex": "0100000008766f61662d322e3002000000023233020000000139010000004064666164646639633633383837303863326130306161323733643734346166663665316164363930346330353639363138373239633864363632336266313537010000000d676174655f6465636973696f6e010000001a30314a5130303030303030303030303030303030303030304150020000001031373530333835383939303030303030010000000467642d32010000001a30314a51303030303030303030303030303030303030303030320100000009616e7468726f7069630100000019616e7468726f7069632d6d657373616765732d73747265616d010000000b746f6f6c755f3031414243010000000462617368010000000c697272657665727369626c6504000000020100000005522d3030330100000005522d3031310100000004686f6c64010000000c757365725f617070726f766502000000043631303004000000020100000006736e61702d610100000006736e61702d62010000004062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262010000004062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262010000000a766967696c2d67617465010000000131"
+    },
+    {
+      "name": "gate_decision_always_allow",
+      "event_kind": "gate_decision",
+      "note": "Revision 4. A person approved the held call and allowed calls like it from then on. Replayed byte for byte, as for user_approve.",
+      "chain_member": false,
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ00000000000000000000AA",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": "01JQ0000000000000000000002",
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": "always_allow",
+        "held_ms": 9400,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "response_hash_delivered": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "preimage_sha256": "5f2be686e5119a6a488adca905dc982d921bb366cc3899376e0a8284e9f3eb55",
+      "preimage_len": 537,
+      "expected_hash": "5f2be686e5119a6a488adca905dc982d921bb366cc3899376e0a8284e9f3eb55",
+      "preimage_hex": "0100000008766f61662d322e3002000000023233020000000139010000004064666164646639633633383837303863326130306161323733643734346166663665316164363930346330353639363138373239633864363632336266313537010000000d676174655f6465636973696f6e010000001a30314a5130303030303030303030303030303030303030304141020000001031373530333835383939303030303030010000000467642d32010000001a30314a51303030303030303030303030303030303030303030320100000009616e7468726f7069630100000019616e7468726f7069632d6d657373616765732d73747265616d010000000b746f6f6c755f3031414243010000000462617368010000000c697272657665727369626c6504000000020100000005522d3030330100000005522d3031310100000004686f6c64010000000c616c776179735f616c6c6f7702000000043934303004000000020100000006736e61702d610100000006736e61702d62010000004062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262010000004062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262010000000a766967696c2d67617465010000000131"
+    },
+    {
+      "name": "gate_decision_restore",
+      "event_kind": "gate_decision",
+      "note": "Revision 4. A file was restored from a pre-execution snapshot. Not a hold: verdict allow, held_ms 0, no tool call. Following the producer, response_hash_upstream is the digest of the file before the restore and response_hash_delivered the digest of the snapshot it was restored to.",
+      "chain_member": false,
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ00000000000000000000RS",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-3",
+        "interaction_id": null,
+        "provider": "unknown",
+        "protocol": "snapshot_restore",
+        "tool_call_id": null,
+        "tool_name": null,
+        "class": "file_write",
+        "rule_ids": [],
+        "verdict": "allow",
+        "decision": "restore",
+        "held_ms": 0,
+        "snapshot_ids": [
+          "snap-a"
+        ],
+        "response_hash_upstream": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "response_hash_delivered": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "actor": "vigil-gate",
+        "policy_version": "2",
+        "event_kind": "gate_decision"
+      },
+      "preimage_sha256": "41ec0f070b862ed7070d8065e597718acf5400b1ceeef4ddaa3caa2022dbfd9e",
+      "preimage_len": 433,
+      "expected_hash": "41ec0f070b862ed7070d8065e597718acf5400b1ceeef4ddaa3caa2022dbfd9e",
+      "preimage_hex": "0100000008766f61662d322e3002000000023233020000000139010000004064666164646639633633383837303863326130306161323733643734346166663665316164363930346330353639363138373239633864363632336266313537010000000d676174655f6465636973696f6e010000001a30314a5130303030303030303030303030303030303030305253020000001031373530333835383939303030303030010000000467642d33000100000007756e6b6e6f776e0100000010736e617073686f745f726573746f72650000010000000a66696c655f777269746504000000000100000005616c6c6f770100000007726573746f726502000000013004000000010100000006736e61702d61010000004065656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565656565010000004066666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666010000000a766967696c2d67617465010000000132"
     }
   ],
   "negative_vectors": [
@@ -965,6 +1196,81 @@
       "mutation": "rule_ids declares a u32be count of 65537, one above 2^16",
       "expected_outcome": "hard failure at that index. No hash is defined for this input.",
       "requirement": "criterion 6: a verifier hard-fails a declared count above 2^16"
+    },
+    {
+      "name": "neg_decision_null",
+      "basis": "gate_decision_deny",
+      "mutation": "decision set to null",
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ0000000000000000000009",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": "01JQ0000000000000000000002",
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": null,
+        "held_ms": 14320,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "response_hash_delivered": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "expected_outcome": "hard failure at that record. decision is not nullable (section 4.4), and section 7 rule 1 makes a nullability violation a hard failure. No hash is defined for this input.",
+      "requirement": "section 7 rule 1: a field that violates its declared nullability is a hard failure"
+    },
+    {
+      "name": "neg_decision_edited_without_rehash",
+      "basis": "gate_decision_deny",
+      "mutation": "decision changed from user_deny to user_approve after the record was sealed; the stored hash was not recomputed",
+      "record": {
+        "seq": 9,
+        "prev_hash": "dfaddf9c6388708c2a00aa273d744aff6e1ad6904c0569618729c8d6623bf157",
+        "id": "01JQ0000000000000000000009",
+        "timestamp_us": 1750385899000000,
+        "gate_id": "gd-2",
+        "interaction_id": "01JQ0000000000000000000002",
+        "provider": "anthropic",
+        "protocol": "anthropic-messages-stream",
+        "tool_call_id": "toolu_01ABC",
+        "tool_name": "bash",
+        "class": "irreversible",
+        "rule_ids": [
+          "R-003",
+          "R-011"
+        ],
+        "verdict": "hold",
+        "decision": "user_approve",
+        "held_ms": 14320,
+        "snapshot_ids": [
+          "snap-a",
+          "snap-b"
+        ],
+        "response_hash_upstream": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "response_hash_delivered": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "actor": "vigil-gate",
+        "policy_version": "1",
+        "event_kind": "gate_decision"
+      },
+      "stored_hash": "eeced3a57e475101a3601bc12346665fe3df6be0425bbc756aedc3027a0b7265",
+      "expected_hash": "40586be2f2cf13e4287550702d9d9422110b88dfc76ba74fda0c815110684749",
+      "expected_outcome": "hard failure at that record. The recomputed hash, expected_hash, does not equal stored_hash (section 7 rule 3).",
+      "requirement": "criterion 4: altering a field value changes the hash, so a decision edited after sealing cannot verify",
+      "must_differ_from": "eeced3a57e475101a3601bc12346665fe3df6be0425bbc756aedc3027a0b7265"
     }
   ]
 }

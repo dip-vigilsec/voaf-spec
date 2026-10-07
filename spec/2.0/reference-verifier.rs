@@ -116,6 +116,7 @@ pub fn field_count(kind: &str) -> Option<i64> {
 pub enum PreimageError {
     UnknownKind(String),
     MissingField(&'static str),
+    NullField(&'static str),
     WrongType(&'static str),
     FieldTooLarge(&'static str, usize),
     ArrayTooLarge(&'static str, usize),
@@ -128,6 +129,7 @@ impl std::fmt::Display for PreimageError {
         match self {
             Self::UnknownKind(k) => write!(f, "unknown event_kind {:?}", k),
             Self::MissingField(n) => write!(f, "missing field {}", n),
+            Self::NullField(n) => write!(f, "field {} is null, and it is not nullable", n),
             Self::WrongType(n) => write!(f, "field {} has the wrong type", n),
             Self::FieldTooLarge(n, l) => write!(f, "field {} is {} bytes, over the limit", n, l),
             Self::ArrayTooLarge(n, l) => write!(f, "array {} has {} elements, over the limit", n, l),
@@ -262,6 +264,15 @@ pub fn preimage(kind: &str, rec: &Value) -> R<Vec<u8>> {
     for (name, ty) in body {
         let raw = get(name)?;
         let v = expand(raw);
+        // Section 7 rule 1: a field that violates its declared nullability is a
+        // hard failure. `decision` is not nullable (section 4.4). Without this a
+        // NULL decision encodes as the one-byte NULL marker, hashes, and
+        // verifies. Rule 1 covers every non-nullable field; this implementation
+        // enforces it for `decision` only. A missing `decision` already fails
+        // at `get` above.
+        if kind == "gate_decision" && *name == "decision" && v.is_null() {
+            return Err(PreimageError::NullField(name));
+        }
         match ty {
             Ty::Str => b.str_field(as_str(&v, name)?, name)?,
             Ty::Int => b.int_field(as_int(&v, name)?, name)?,
