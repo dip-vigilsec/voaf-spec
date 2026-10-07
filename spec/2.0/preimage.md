@@ -26,8 +26,9 @@ the format tag stays `voaf-2.0`. It adds two `gate_decision.decision` tokens
 (section 4.7.1) and scopes the section 4.4 NULL-delivery rule to the held call,
 states how a verifier treats a decision it does not recognise and how that
 vocabulary is versioned (section 7), makes the reference verifier reject a NULL
-`decision`, adds six positive and two negative vectors, and extends the section
-8.1 field table to match. Every revision 3 vector, and the chain, is unchanged.
+`decision` and escape the kind in its unknown-kind error, adds six positive and
+two negative vectors, and extends the section 8.1 field table to match. Every
+revision 3 vector, and the chain, is unchanged.
 
 ## 1. Why this replaces the v1 construction
 
@@ -729,6 +730,9 @@ For each record in `seq` order:
    MUST NOT count or present that record as an allow, and SHOULD report the
    record with its raw `decision` value. A record that verifies is intact; that
    says nothing about whether an unrecognised decision delivered the held call.
+   Raw means as stored, not mapped to a known token. A verifier that shows the
+   value, or any other string a document carries, to a person escapes it first,
+   so that a document cannot forge or hide the verifier's own output.
 3. Recompute the preimage from the record's own fields, `SHA256` it, and compare
    to the stored hash.
 4. Check `prev_hash` equals the previous record's **stored** hash.

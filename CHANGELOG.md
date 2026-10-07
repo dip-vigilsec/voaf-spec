@@ -24,7 +24,8 @@ Minor. No preimage byte changes and the format tag stays `voaf-2.0`, so every
 
   First written by Vigil 2.3.2. No tagged release before 2.3.2 writes either value.
 - Section 7: a verifier MUST NOT count or present an unrecognised `decision` as an
-  allow, and SHOULD report such records with the raw value.
+  allow, and SHOULD report such records with the raw value. Raw means as stored;
+  a verifier that shows a document string to a person escapes it first.
 - Section 7.1: adding a `decision` value is a minor change. Removing one, or
   changing its meaning, is a major change.
 - Six positive vectors, one for each `decision` value no earlier vector carried:
@@ -46,10 +47,12 @@ Minor. No preimage byte changes and the format tag stays `voaf-2.0`, so every
   `decision` already failed. Rule 1 covers every non-nullable field; the reference
   verifier checks `decision` only, and a NULL in another non-nullable field still
   encodes as the NULL marker.
-- The reference verifier's unknown `event_kind` message escapes the kind in full.
-  It used Rust's `{:?}`, which escapes line breaks and controls but passes
-  printable non-ASCII through, so a lookalike of a real kind, or an invisible
-  filler character, reached any caller that printed the message.
+- The reference verifier's unknown `event_kind` error escapes the kind in full,
+  in both Display and Debug. It used Rust's `{:?}`, which escapes line breaks and
+  controls but passes printable non-ASCII through, so a lookalike of a real kind,
+  or an invisible filler character, reached any caller that printed the error.
+  The escape writes `\u{..}` for everything outside printable ASCII, never `\n`,
+  `\r` or `\t`, which a shell's `echo` turns back into line breaks.
 
 ### Compatibility
 

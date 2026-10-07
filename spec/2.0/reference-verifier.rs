@@ -112,7 +112,6 @@ pub fn field_count(kind: &str) -> Option<i64> {
     schema(kind).map(|body| 7 + body.len() as i64)
 }
 
-#[derive(Debug)]
 pub enum PreimageError {
     UnknownKind(String),
     MissingField(&'static str),
@@ -127,11 +126,7 @@ pub enum PreimageError {
 impl std::fmt::Display for PreimageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // The kind is the one document string a message carries. Escaped
-            // in full: everything outside printable ASCII, the backslash and
-            // the quotes, so a caller that prints this cannot be handed a line
-            // break, a terminal control or a lookalike of a real kind.
-            Self::UnknownKind(k) => write!(f, "unknown event_kind \"{}\"", k.escape_default()),
+            Self::UnknownKind(k) => write!(f, "unknown event_kind \"{}\"", escaped(k)),
             Self::MissingField(n) => write!(f, "missing field {}", n),
             Self::NullField(n) => write!(f, "field {} is null, and it is not nullable", n),
             Self::WrongType(n) => write!(f, "field {} has the wrong type", n),
@@ -143,6 +138,34 @@ impl std::fmt::Display for PreimageError {
             }
         }
     }
+}
+
+/// Debug is what `unwrap`, `expect` and a `main` that returns this error print,
+/// so it writes the same escaped text as Display rather than a derived form that
+/// would show the kind raw.
+impl std::fmt::Debug for PreimageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
+/// The kind is the one document string a message carries. Printable ASCII as
+/// itself, the backslash and the quote escaped, everything else as a `\u{..}`
+/// escape: never the short forms `\n`, `\r` or `\t`, which a shell's `echo`
+/// turns back into the characters they name. A caller that prints a message can
+/// then be handed neither a line break, a terminal control nor a lookalike of a
+/// real kind.
+fn escaped(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            ' '..='~' => out.push(c),
+            _ => out.push_str(&c.escape_unicode().to_string()),
+        }
+    }
+    out
 }
 
 type R<T> = Result<T, PreimageError>;
