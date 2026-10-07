@@ -46,6 +46,10 @@ Minor. No preimage byte changes and the format tag stays `voaf-2.0`, so every
   `decision` already failed. Rule 1 covers every non-nullable field; the reference
   verifier checks `decision` only, and a NULL in another non-nullable field still
   encodes as the NULL marker.
+- The reference verifier's unknown `event_kind` message escapes the kind in full.
+  It used Rust's `{:?}`, which escapes line breaks and controls but passes
+  printable non-ASCII through, so a lookalike of a real kind, or an invisible
+  filler character, reached any caller that printed the message.
 
 ### Compatibility
 

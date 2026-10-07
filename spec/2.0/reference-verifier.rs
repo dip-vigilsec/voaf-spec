@@ -127,7 +127,11 @@ pub enum PreimageError {
 impl std::fmt::Display for PreimageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownKind(k) => write!(f, "unknown event_kind {:?}", k),
+            // The kind is the one document string a message carries. Escaped
+            // in full: everything outside printable ASCII, the backslash and
+            // the quotes, so a caller that prints this cannot be handed a line
+            // break, a terminal control or a lookalike of a real kind.
+            Self::UnknownKind(k) => write!(f, "unknown event_kind \"{}\"", k.escape_default()),
             Self::MissingField(n) => write!(f, "missing field {}", n),
             Self::NullField(n) => write!(f, "field {} is null, and it is not nullable", n),
             Self::WrongType(n) => write!(f, "field {} has the wrong type", n),
