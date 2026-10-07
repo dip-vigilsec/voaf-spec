@@ -17,10 +17,10 @@ Minor. No preimage byte changes and the format tag stays `voaf-2.0`, so every
   decided. In both, the held call was not delivered to the client.
   - `shutdown_deny`: the producer denied an open hold because it was shutting
     down, and wrote deny text in place of the call. Introduced in Vigil commit
-    `ab2da26`.
+    `ab2da26`, and extended to holds refused after shutdown began in `9aae674`.
   - `connection_panicked`: the task serving the connection failed while the hold
-    was open, and the connection supervisor recorded the hold. Nothing was
-    delivered. Introduced in Vigil commit `5fd9c39`.
+    was open, and the connection supervisor recorded the hold. Nothing of the held
+    call was delivered. Introduced in Vigil commit `5fd9c39`.
 
   First written by Vigil 2.3.2. No tagged release before 2.3.2 writes either value.
 - Section 7: a verifier MUST NOT count or present an unrecognised `decision` as an
@@ -32,16 +32,20 @@ Minor. No preimage byte changes and the format tag stays `voaf-2.0`, so every
   `always_allow` and `restore`. Two negative vectors: a NULL `decision`, and a
   `decision` edited without re-hashing. 24 vectors and 6 negative vectors in all.
 
-### Fixed
-
-- `spec/2.0/reference-verifier.rs` rejects a NULL `decision`, per section 7 rule 1.
-  It used to encode the one-byte NULL marker, so the record verified. A missing
-  `decision` already failed.
-
 ### Changed
 
 - Section 4.4: `connection_panicked`, like `client_disconnected`, carries a NULL
   `response_hash_delivered`, and it also carries a NULL `response_hash_upstream`.
+  The rule is scoped to the held call: on a streamed response the events before
+  it may already have reached the client.
+
+### Fixed
+
+- `spec/2.0/reference-verifier.rs` rejects a NULL `decision`, per section 7 rule 1.
+  It used to encode the one-byte NULL marker, so the record verified. A missing
+  `decision` already failed. Rule 1 covers every non-nullable field; the reference
+  verifier checks `decision` only, and a NULL in another non-nullable field still
+  encodes as the NULL marker.
 
 ### Compatibility
 

@@ -938,7 +938,7 @@
     {
       "name": "gate_decision_shutdown_deny",
       "event_kind": "gate_decision",
-      "note": "Revision 4. The producer was shutting down with this hold open, so it denied the hold itself. It wrote deny text in place of the call, the same substitution as user_deny, so both response hashes are present and differ. Not a person's deny, and not an allow. Section 4.7.1.",
+      "note": "Revision 4. The producer was shutting down with this hold open, or refused the hold because shutdown had begun, so it denied the hold itself. It wrote deny text in place of the call, the same substitution as user_deny, so both response hashes are present and differ. Not a person's deny, and not an allow. Section 4.7.1.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -977,7 +977,7 @@
     {
       "name": "gate_decision_connection_panicked",
       "event_kind": "gate_decision",
-      "note": "Revision 4. The task serving the connection failed while this hold was open and undecided, and the producer's connection supervisor recorded the hold. Nothing was delivered for the call, and the supervisor holds neither response hash, so both are NULL, as is interaction_id. Section 4.7.1.",
+      "note": "Revision 4. The task serving the connection failed while this hold was open and undecided, and the producer's connection supervisor recorded the hold. Nothing was delivered for the call, and the supervisor holds neither response hash, so both are NULL. interaction_id is NULL as Vigil 2.3.2 writes it on every gate_decision record. Section 4.7.1.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1055,7 +1055,7 @@
     {
       "name": "gate_decision_user_approve",
       "event_kind": "gate_decision",
-      "note": "Revision 4. A person approved the held call. An approved call is replayed byte for byte, so the delivered hash equals the upstream hash.",
+      "note": "Revision 4. A person approved the held call, and it was replayed. In this vector the response carries one call and nothing was substituted, so the two hashes are equal. They are taken when the hold resolves, over the response so far, so an approved call's record can carry different hashes when an earlier call in the same response was substituted, another is still held, or upstream bytes after the call have not yet been released.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1094,7 +1094,7 @@
     {
       "name": "gate_decision_always_allow",
       "event_kind": "gate_decision",
-      "note": "Revision 4. A person approved the held call and allowed calls like it from then on. Replayed byte for byte, as for user_approve.",
+      "note": "Revision 4. A person approved the held call and allowed calls like it from then on. As in gate_decision_user_approve, the two hashes are equal in this vector only because nothing else in the response was substituted or held when the hold resolved.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1133,7 +1133,7 @@
     {
       "name": "gate_decision_restore",
       "event_kind": "gate_decision",
-      "note": "Revision 4. A file was restored from a pre-execution snapshot. Not a hold: verdict allow, held_ms 0, no tool call. Following the producer, response_hash_upstream is the digest of the file before the restore and response_hash_delivered the digest of the snapshot it was restored to.",
+      "note": "Revision 4. A file was restored from a pre-execution snapshot. Not a hold: verdict allow, held_ms 0, no tool call. Following the producer, response_hash_upstream is the digest of the file before the restore, or NULL when no file was at the path, and response_hash_delivered is the digest of the snapshot it was restored to.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1230,7 +1230,8 @@
         "policy_version": "1",
         "event_kind": "gate_decision"
       },
-      "expected_outcome": "hard failure at that record. decision is not nullable (section 4.4), and section 7 rule 1 makes a nullability violation a hard failure. No hash is defined for this input.",
+      "stored_hash": "ce1ce78abcb4ed57f3fc573c43999217b45baf079be268b4f89981d3ac879cca",
+      "expected_outcome": "hard failure at that record. decision is not nullable (section 4.4), and section 7 rule 1 makes a nullability violation a hard failure. No hash is defined for this input. stored_hash is what an encoder that accepts the NULL would compute, so recompute would match it and only rule 1 rejects the record.",
       "requirement": "section 7 rule 1: a field that violates its declared nullability is a hard failure"
     },
     {

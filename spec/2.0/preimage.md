@@ -23,10 +23,11 @@ Revision 1 and 2 vectors are withdrawn, not amended.
 
 Revision 4 is spec release 2.1.0. It changes no preimage byte and no field, so
 the format tag stays `voaf-2.0`. It adds two `gate_decision.decision` tokens
-(section 4.7.1), states how a verifier treats a decision it does not recognise
-and how that vocabulary is versioned (section 7), makes the reference verifier
-reject a NULL `decision`, and adds six positive and two negative vectors. Every
-revision 3 vector, and the chain, is unchanged.
+(section 4.7.1) and scopes the section 4.4 NULL-delivery rule to the held call,
+states how a verifier treats a decision it does not recognise and how that
+vocabulary is versioned (section 7), makes the reference verifier reject a NULL
+`decision`, adds six positive and two negative vectors, and extends the section
+8.1 field table to match. Every revision 3 vector, and the chain, is unchanged.
 
 ## 1. Why this replaces the v1 construction
 
@@ -444,10 +445,12 @@ on this branch. That file's section 10 is informative; this table is normative.
 
 An empty `rule_ids` is a present array with count 0, not NULL.
 
-`response_hash_delivered` is NULL when nothing was delivered. The
-`client_disconnected` and `connection_panicked` outcomes are exactly that case: a
-hold whose client left mid-hold, or whose connection task failed while it was
-held, delivered no bytes, and recording a delivery hash for it would assert a
+`response_hash_delivered` is NULL when nothing was delivered for the held call:
+neither the call nor anything in its place. The `client_disconnected` and
+`connection_panicked` outcomes are exactly that case: a hold whose client left
+mid-hold, or whose connection task failed while it was held. On a streamed
+response the client may already have received the events before the held call;
+what it never received is the call, and recording a delivery hash would assert a
 delivery that did not happen. A verifier must not treat a NULL there as missing
 data. `connection_panicked` also carries a NULL `response_hash_upstream`
 (section 4.7.1).
@@ -520,25 +523,32 @@ and neither is an allow.
   client in place of the tool call, the same substitution it makes for
   `user_deny`, so the client never receives the call. `response_hash_upstream`
   and `response_hash_delivered` are both present, and they differ.
+- Where it lands: the connection task records it while the producer shuts down,
+  so a `shutdown_deny` record can follow the `lifecycle` `shutdown` record, can
+  fall after the head anchor (the unanchored tail of section 6), and is absent if
+  the process ends before the task records it.
 
 **`connection_panicked`**
 
 - Written by: the producer's connection supervisor, not the gate's decision path.
 - When: the task serving the client connection failed while the hold was still
-  open and undecided. The supervisor removes the hold from the producer's queue,
-  so no later decision can act on it, and records it.
+  open and undecided. The supervisor removes each hold still in the producer's
+  queue when it runs, so no later decision can act on it, and records it. In
+  Vigil 2.3.2 a hold decided in the moment between the failure and that flush
+  leaves no record of either kind.
 - Whether the held action executed: no. The task that held the call and the
   client connection is gone. The call is never written to the client, and the
-  client sees its connection close. `interaction_id`, `response_hash_upstream` and
+  client sees its connection close. `response_hash_upstream` and
   `response_hash_delivered` are NULL: the supervisor never held the response, and
-  nothing was delivered.
+  nothing was delivered for the call.
 
 "Did not execute" is the producer's account of what it delivered, the same
 self-attestation section 9 describes for the response hashes. No record can show
 what a client did with a call it obtained some other way.
 
 In Vigil 2.3.2 the two values come from `decision_str` and `record_orphaned_hold`
-in `vigil-proxy/src/proxy.rs`.
+in `vigil-proxy/src/proxy.rs`. Vigil 2.3.2 writes `interaction_id` NULL on every
+`gate_decision` record, whatever the decision.
 
 ### 4.7b `lifecycle`, fields 8 to 10
 
@@ -715,10 +725,10 @@ For each record in `seq` order:
    no field type and so needs no tag bump. A verifier that rejected unknown tokens
    would reject valid future records.
 
-   A verifier MUST NOT count or present a `gate_decision` record whose `decision`
-   it does not recognise as an allow, and SHOULD report such records with the raw
-   `decision` value. A record that verifies is intact; that says nothing about
-   whether an unrecognised decision delivered the held call.
+   If a verifier does not recognise a `gate_decision` record's `decision`, it
+   MUST NOT count or present that record as an allow, and SHOULD report the
+   record with its raw `decision` value. A record that verifies is intact; that
+   says nothing about whether an unrecognised decision delivered the held call.
 3. Recompute the preimage from the record's own fields, `SHA256` it, and compare
    to the stored hash.
 4. Check `prev_hash` equals the previous record's **stored** hash.
@@ -748,11 +758,16 @@ that qualifier.
 ### 7.1 Versioning the `gate_decision.decision` vocabulary
 
 Adding a `decision` value is a minor change. Removing one, or changing the meaning
-of one, is a major change. This governs the spec's release version, not the
-format tag: section 2.2 alone decides when the tag changes, and neither kind of
-change touches a field list, a field order or a field type. Rule 2 is what makes
-an added value safe for a verifier that predates it: that verifier still verifies
-the record, and reports the value rather than reading it as an allow.
+of one, is a major change. A value's meaning is what section 4 says of it. This
+governs the spec's release version, not the format tag: section 2.2 alone decides
+when the tag changes, and neither kind of change touches a field list, a field
+order or a field type. A major release under this section does not re-root the
+chain either; the section 5.1 pattern belongs to a new tag.
+
+Rule 2 is what makes an added value safe for a verifier that predates it: that
+verifier still verifies the record. A verifier written to revision 4 or later is
+also bound by the rule 2 addition: it does not read the value as an allow, and it
+should report it. A 2.0.0 verifier is bound only by rule 2 itself.
 
 ## 8. Acceptance
 
@@ -802,7 +817,8 @@ than left to be inferred.
 | `chain.head_hash`, `chain.entry_count` | The walk's expected head and length |
 | `negative_vectors[]` | Inputs that must not verify, or mutations whose hash must move |
 | `negative_vectors[].record` | Present from revision 4: a whole record that must fail section 7 at that record. `neg_decision_null` fails rule 1 before any hash is computed |
-| `negative_vectors[].stored_hash` | The hash a document carries for `record`. `expected_hash` is what recompute gives instead, so rule 3 fails |
+| `negative_vectors[].stored_hash` | The hash a document carries for `record`. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In `neg_decision_null`, it is what an encoder that accepts the NULL would compute, so only rule 1 rejects the record |
+| `revision_4` | What revision 4 added to this file |
 
 **Chain membership is `chain_member`, not prose.** Walk exactly the vectors
 where it is true, in `seq` order. An earlier revision expressed membership only
