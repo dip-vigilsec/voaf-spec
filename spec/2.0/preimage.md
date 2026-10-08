@@ -472,6 +472,97 @@ delivery that did not happen. A verifier must not treat a NULL there as missing
 data. `connection_panicked` also carries a NULL `response_hash_upstream`
 (section 4.7.1).
 
+### 4.4.1 What each `decision` records
+
+Added in revision 4, spec release 2.1.0. This is the meaning section 7.1 refers
+to. A record's meaning is its (`verdict`, `decision`) pair, never `verdict` alone:
+`verdict` says only whether the gate's policy concluded that the call should be
+held.
+
+"Delivered" means the producer released the call's own events to the client,
+not a substitute for them. A producer cannot see whether a client received or
+executed a call, so release is the most a record attests, and it is the
+producer's own account (section 9). A call that was not delivered was not
+executed through this producer.
+
+| `verdict` | `decision` | Decided by | Recorded by | The call delivered | Written in its place |
+| --- | --- | --- | --- | --- | --- |
+| `allow` | `allow` | the gate's policy, which did not hold the call | the gate | yes | nothing |
+| `hold` | `allow` | the gate's policy, which would have held the call, under a gate set to observe only | the gate | yes, without waiting | nothing |
+| `hold` | `user_approve` | a person, deciding the held call | the gate | yes, after the hold | nothing |
+| `hold` | `always_allow` | a person, deciding the held call and allowing calls like it from then on | the gate | yes, after the hold | nothing |
+| `hold` | `user_deny` | a person, deciding the held call | the gate | no | deny text |
+| `hold` | `timeout_deny` | the producer, when the hold window passed with no decision | the gate | no | deny text that names the window |
+| `hold` | `client_disconnected` | nobody: the producer found during the hold that the client had gone | the gate | no | nothing |
+| `hold` | `shutdown_deny` | the producer, shutting down (section 4.7.1) | the gate | no | deny text |
+| `hold` | `connection_panicked` | nobody: the task serving the connection panicked during the hold (section 4.7.1) | the connection supervisor | no | nothing |
+| `allow` | `restore` | whoever asked the producer to restore a file | the producer's restore interface | no call is involved | the snapshot, over the file it was taken from |
+
+**An allow** is a record whose pair says the call was delivered: (`allow`,
+`allow`), (`hold`, `allow`), (`hold`, `user_approve`) and (`hold`,
+`always_allow`). Section 7 rule 2 uses the word in this sense. A verifier that
+counts allows counts these four pairs by the pair: (`hold`, `allow`) is an allow,
+and (`allow`, `restore`) is not.
+
+**(`hold`, `allow`) is not a released hold.** The call never waited. `verdict`
+`hold` records what the policy concluded, and `decision` `allow` records that a
+gate set to observe only delivered the call anyway. `held_ms` is 0. A verifier
+must not count it as a hold that a person released.
+
+**(`allow`, `restore`) is not a tool-call decision.** It records the producer
+writing a pre-execution snapshot back over the file it was taken from. No tool
+call and no response is involved: `tool_call_id` and `tool_name` are NULL,
+`held_ms` is 0, and `snapshot_ids` holds the restored snapshot's id. The two hash
+fields are file digests, not response hashes: `response_hash_upstream` is the
+SHA-256 of the file at that path before the restore, NULL when no file could be
+read there, and `response_hash_delivered` is the SHA-256 of the snapshot content
+written over it. `verdict` `allow` means only that the restore went ahead.
+
+**The response hashes on every other pair.** `response_hash_upstream` is the
+SHA-256 of the upstream response as the producer had received it when it
+recorded the decision. `response_hash_delivered` is the SHA-256 of what the
+producer had written, or was writing, to the client for that response by then,
+including anything it wrote in place of a call, and is NULL when it wrote nothing
+for the decided call (section 4.4). Neither shows that the client received
+anything (section 9).
+
+Informative, for Vigil 2.3.2 (the source at Vigil commit `c449787`; no 2.3.2
+release is tagged at the time of writing):
+
+- `actor` is the constant `vigil-gate` on every record, whoever decided. The
+  pair, not `actor`, says who decided.
+- A person decides from the tray (approve, deny) or the dashboard (approve,
+  deny, always allow), both through the token-guarded local API, which any local
+  process holding the token can also call. A restore has no tray or dashboard
+  control and runs through that API only.
+- (`hold`, `allow`) is written only when the gate policy's `gate_enabled` is
+  false.
+- (`allow`, `allow`) and (`hold`, `allow`) are written only on a streamed
+  response, at its final chunk, with hashes over the whole response. An allowed
+  or observe-only call on a buffered response, or on a stream cut before its
+  final chunk, has no record, so the absence of a `gate_decision` record is not
+  evidence that no tool call was made.
+- After `always_allow`, a later call the new allowlist entry covers is recorded
+  as (`allow`, `allow`) with empty `rule_ids` and nothing linking it to the
+  `always_allow` record. The allowlist is not chained.
+- A hold record's hashes cover the response up to the moment the hold resolved.
+  In a response with several calls, a hold resolved while another is undecided
+  can carry a `response_hash_delivered` over output that excludes its own call:
+  on a buffered response, the SHA-256 of empty input.
+- `held_ms` is counted in whole seconds, times 1000, and `timestamp_us` is the
+  time the record was written, not the time of the decision: for (`allow`,
+  `allow`) and (`hold`, `allow`), the end of the stream.
+- Release is not receipt. A streamed write to the client is not checked. A
+  released call queued behind a call that never resolves is dropped at the end
+  of the stream while its record still reads `allow`, `user_approve` or
+  `always_allow`. On a buffered response the producer's repair step can replace
+  the body after the records are written. When another call in the same message
+  was denied, a released call can be re-serialized rather than byte-identical.
+- An answer of success from the decide endpoint is not proof of the recorded
+  outcome. A decision that races the hold window, a failed keepalive write or
+  the connection task's own resolution can be acknowledged and then lost, and
+  the record carries the outcome the task took.
+
 ### 4.5 `chain_upgrade`, fields 8 to 11
 
 | # | Field | Type | Nullable |
@@ -524,11 +615,13 @@ The live store holds `"Direct"`,
 | `gate_decision.decision` | `allow`, `user_approve`, `user_deny`, `timeout_deny`, `always_allow`, `restore`, `client_disconnected`, `shutdown_deny`, `connection_panicked` |
 | `lifecycle.event` | `startup`, `shutdown`, `protection_on`, `protection_off`, `reanchored` |
 
+Section 4.4.1 defines each `gate_decision.decision` value.
+
 ### 4.7.1 `shutdown_deny` and `connection_panicked`
 
 Added in revision 4, spec release 2.1.0. Each records a held call that no person
 decided, and each is written with `verdict` = `hold`. Neither is a person's deny,
-and neither is an allow.
+and neither is an allow (section 4.4.1).
 
 **`shutdown_deny`**
 
@@ -766,9 +859,10 @@ For each record in `seq` order:
    would reject valid future records.
 
    If a verifier does not recognise a `gate_decision` record's `decision`, it
-   MUST NOT count or present that record as an allow, and SHOULD report the
-   record with its raw `decision` value. A record that verifies is intact; that
-   says nothing about whether an unrecognised decision delivered the held call.
+   MUST NOT count or present that record as an allow (section 4.4.1), and
+   SHOULD report the record with its raw `decision` value. A record that
+   verifies is intact; that says nothing about whether an unrecognised decision
+   delivered the held call.
    Raw means as stored, not mapped to a known token. A verifier that shows the
    value, or any other string a document carries, to a person escapes it first,
    so that a document cannot forge or hide the verifier's own output.
@@ -801,11 +895,12 @@ that qualifier.
 ### 7.1 Versioning the `gate_decision.decision` vocabulary
 
 Adding a `decision` value is a minor change. Removing one, or changing the meaning
-of one, is a major change. A value's meaning is what section 4 says of it. This
-governs the spec's release version, not the format tag: section 2.2 alone decides
-when the tag changes, and neither kind of change touches a field list, a field
-order or a field type. A major release under this section does not re-root the
-chain either; the section 5.1 pattern belongs to a new tag.
+of one, is a major change. A value's meaning is its row in section 4.4.1 and
+whatever else section 4 says of it, and a release that adds a value adds its row
+there. This governs the spec's release version, not the format tag: section 2.2
+alone decides when the tag changes, and neither kind of change touches a field
+list, a field order or a field type. A major release under this section does not
+re-root the chain either; the section 5.1 pattern belongs to a new tag.
 
 Rule 2 is what makes an added value safe for a verifier that predates it: that
 verifier still verifies the record. A verifier written to revision 4 or later is
