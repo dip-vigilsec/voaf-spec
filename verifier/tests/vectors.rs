@@ -257,3 +257,35 @@ fn the_strict_parse_matches_serde_json() {
     assert!(voaf::parse_document("{\"a\": {\"b\": 1, \"b\": 1}}").is_err(), "a repeat at depth");
     assert!(voaf::parse_document("{\"a\": 1, \"\\u0061\": 1}").is_err(), "a repeat written with an escape");
 }
+
+/// The vectors-file loader clamps `count` before allocating, so a huge count
+/// costs at most one field over the limit and fails in `preimage`, never an
+/// allocation of the size asked for, and never a panic.
+#[test]
+fn a_huge_repeat_count_fails_at_the_limit_without_allocating_it() {
+    let d = file();
+    let base = by_name(&d, "interaction_minimal");
+    for (ch, over) in [("A", voaf::MAX_FIELD_BYTES + 1), ("\u{65e5}", voaf::MAX_FIELD_BYTES + 2), ("\u{1f600}", voaf::MAX_FIELD_BYTES + 4)] {
+        for count in [u64::MAX, 1 << 40, (voaf::MAX_FIELD_BYTES as u64) + 1] {
+            let mut v = base.clone();
+            v["record"]["user_message"] = serde_json::json!({"$repeat": {"char": ch, "count": count}});
+            let rec = voaf::expand_vector_record(&v["record"]).unwrap();
+            assert!(rec["user_message"].as_str().unwrap().len() <= over);
+            let err = voaf::preimage("interaction", &rec).expect_err("over the limit");
+            assert!(matches!(err, voaf::PreimageError::FieldTooLarge("user_message", _)), "{}", err);
+        }
+    }
+}
+
+/// Content is covered only where it is present and non-null.
+#[test]
+fn content_stripped_to_null_is_not_covered() {
+    let d = file();
+    let mut rec = expanded(by_name(&d, "interaction_minimal"));
+    rec["user_message"] = Value::Null;
+    rec["ai_response"] = Value::Null;
+    assert!(!voaf::content_covered("interaction", &rec));
+    rec["ai_response"] = Value::String(String::new());
+    assert!(voaf::content_covered("interaction", &rec));
+    assert!(!voaf::content_covered("lifecycle", &rec));
+}

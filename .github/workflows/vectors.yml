@@ -30,4 +30,4 @@ jobs:
       # that is removed, ignored or filtered cannot pass by not running.
       - name: Every test ran
         run: |
-          grep -E '^test result: ok\. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"
+          grep -E '^test result: ok\. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"

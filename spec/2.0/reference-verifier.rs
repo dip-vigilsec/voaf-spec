@@ -476,7 +476,17 @@ fn expand_repeat(name: &str, v: &Value) -> R<Value> {
         return Err(bad());
     }
     let n = inner.get("count").and_then(Value::as_u64).ok_or_else(bad)?;
-    Ok(Value::String(c.repeat(n as usize)))
+    // Clamp before allocating, as Vigil's vigil-verify has since 204a776. The
+    // count is a number in a file, and expanding it faithfully lets a few bytes
+    // of JSON ask for gigabytes, or overflow and panic, before the per-field limit
+    // is ever checked. One character over the limit is enough for `preimage` to
+    // reject the field, and costs at most 1 MB to build.
+    let n = usize::try_from(n).unwrap_or(usize::MAX);
+    let per = c.len();
+    if n.saturating_mul(per) > MAX_FIELD_BYTES {
+        return Ok(Value::String(c.repeat(MAX_FIELD_BYTES / per + 1)));
+    }
+    Ok(Value::String(c.repeat(n)))
 }
 
 /// Part of the format surface, exercised by the vector tests. The binary does
@@ -500,6 +510,14 @@ pub fn hex(bytes: &[u8]) -> String {
 /// Only `interaction` records carry content. A v1 record covers none of it,
 /// which is the whole reason for 2.0, and the verifier says so per record.
 pub fn content_covered(kind: &str, rec: &Value) -> bool {
+    // Present AND non-null, as Vigil's vigil-verify has since dfba3ad.
+    // `Value::get` returns Some(Value::Null) for a member that is present and
+    // null, so an `is_some()` here counted a record whose content had been
+    // stripped to nulls as content covered by its hash. Such a record still
+    // verifies, correctly, because it is internally consistent; this answer was
+    // the only thing that would have said otherwise.
     kind == "interaction"
-        && (rec.get("user_message").is_some() || rec.get("ai_response").is_some())
+        && ["user_message", "ai_response"]
+            .iter()
+            .any(|k| rec.get(*k).is_some_and(|v| !v.is_null()))
 }
