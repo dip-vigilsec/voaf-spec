@@ -11,8 +11,11 @@
 //!
 //! It is independent of the writer, Vigil's `chain::preimage`, and of nothing
 //! else: it began as the preimage module of Vigil's vigil-verify
-//! (`vigil-verify/src/voaf.rs`), and the two are kept in step, so agreement
-//! between them is one implementation agreeing with itself.
+//! (`vigil-verify/src/voaf.rs`), so agreement between the two is one lineage
+//! agreeing with itself. vigil-verify does not yet make the 2.1.0 checks this
+//! file makes: the parse check, the closed member set, rule 1 for every field,
+//! the `hash` and `event_kind` members, and the 1.x relabel check. It gains them
+//! in a later pull request.
 //!
 //! Consequence, stated so nobody is surprised: a change to the preimage must be
 //! made here as well, and the vector tests are what catch a miss.
@@ -138,6 +141,8 @@ pub fn field_count(kind: &str) -> Option<i64> {
 pub enum PreimageError {
     UnknownKind(String),
     NotARecord,
+    FormatMismatch(String),
+    UndeclaredFormat,
     UnknownMember(String),
     KindMismatch,
     MissingField(&'static str),
@@ -156,6 +161,8 @@ impl std::fmt::Display for PreimageError {
         match self {
             Self::UnknownKind(k) => write!(f, "unknown event_kind \"{}\"", escaped(k)),
             Self::NotARecord => write!(f, "the record is not a JSON object"),
+            Self::FormatMismatch(why) => write!(f, "the document declares VOAF 1.x and carries {}", why),
+            Self::UndeclaredFormat => write!(f, "the document declares no VOAF version"),
             Self::UnknownMember(m) => {
                 write!(f, "member \"{}\" is not a field of this kind", escaped(m))
             }
@@ -218,12 +225,18 @@ impl std::fmt::Debug for ParseError {
     }
 }
 
-/// Parse a document's text. Section 7 rule 1 starts here: an object that
-/// repeats a member name, at any depth, does not decode (RFC 7493 section 2.3).
+/// Parse a document's text: the section 7 parse check. An object that repeats a
+/// member name, at any depth, does not decode (RFC 7493 section 2.3).
 /// A parser that keeps one copy of a repeated name has discarded the other before
 /// anything can look at it, so the check has to be made while parsing; a
 /// `serde_json::Value` cannot show it. Every `Value` given to `preimage` should
 /// come from here.
+///
+/// Build this file with serde_json's default number handling. Under its
+/// `arbitrary_precision` feature a number outside i64 and u64 reaches the visitor
+/// as a one-member map, which `visit_map` refuses below, and `-0` reaches it as
+/// the integer 0, which section 2 forbids; the harness checks that `-0` arrives
+/// as a float.
 pub fn parse_document(text: &str) -> Result<Value, ParseError> {
     let mut de = serde_json::Deserializer::from_str(text);
     let v = Strict.deserialize(&mut de).map_err(|e| ParseError(e.to_string()))?;
@@ -281,6 +294,11 @@ impl<'de> Visitor<'de> for Strict {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
         let mut members = serde_json::Map::new();
         while let Some(name) = map.next_key::<String>()? {
+            if name.starts_with("$serde_json::private::") {
+                return Err(de::Error::custom(
+                    "serde_json is built with a number or raw-value feature this parser does not support",
+                ));
+            }
             if members.contains_key(&name) {
                 return Err(de::Error::custom(format!(
                     "member name \"{}\" is repeated in one object",
@@ -352,11 +370,13 @@ fn as_bool(v: &Value, name: &'static str) -> R<bool> {
 
 /// Build the preimage for one record.
 ///
-/// `rec` is a record as a document carries it: the envelope fields (`seq`,
-/// `prev_hash`, `id`, `timestamp_us`) and the body fields for its kind, flat, and
-/// optionally `event_kind` and `hash`. Nothing else. Section 7 rule 1 is checked
-/// in full before a byte is emitted: the member set, every type, every
-/// nullability, every array element.
+/// `rec` carries the envelope fields (`seq`, `prev_hash`, `id`, `timestamp_us`)
+/// and the body fields for its kind, flat, and optionally `event_kind` and `hash`;
+/// nothing else. A vector's record carries neither of the two; a document's
+/// record carries both, and `record()` requires them. The member set is checked
+/// first; the type, nullability and limit checks run field by field in section 4
+/// order, so a record with several defects reports the first, and no preimage is
+/// returned unless every check passes.
 pub fn preimage(kind: &str, rec: &Value) -> R<Vec<u8>> {
     let body = schema(kind).ok_or_else(|| PreimageError::UnknownKind(kind.to_string()))?;
     let count = field_count(kind).unwrap();
@@ -379,6 +399,13 @@ pub fn preimage(kind: &str, rec: &Value) -> R<Vec<u8>> {
     if let Some(k) = members.get("event_kind") {
         if k.as_str() != Some(kind) {
             return Err(PreimageError::KindMismatch);
+        }
+    }
+    // `hash` is the stored hash rule 3 compares against: a string, never anything
+    // that could carry other text.
+    if let Some(h) = members.get("hash") {
+        if !h.is_string() {
+            return Err(PreimageError::WrongType("hash"));
         }
     }
 
@@ -452,13 +479,91 @@ pub fn record_hash(kind: &str, rec: &Value) -> R<String> {
     Ok(hex(&Sha256::digest(preimage(kind, rec)?)))
 }
 
+/// A record as a document carries it (section 7 rule 1): `event_kind` and `hash`
+/// are present strings, and every other check `preimage` makes passes. Returns
+/// the kind, the recomputed hash and the stored hash, for rule 3 to compare.
+pub fn record(rec: &Value) -> R<(String, String, String)> {
+    let members = rec.as_object().ok_or(PreimageError::NotARecord)?;
+    let kind = match members.get("event_kind") {
+        None => return Err(PreimageError::MissingField("event_kind")),
+        Some(Value::String(k)) => k.clone(),
+        Some(_) => return Err(PreimageError::WrongType("event_kind")),
+    };
+    let stored = match members.get("hash") {
+        None => return Err(PreimageError::MissingField("hash")),
+        Some(Value::String(h)) => h.clone(),
+        Some(_) => return Err(PreimageError::WrongType("hash")),
+    };
+    let computed = record_hash(&kind, rec)?;
+    Ok((kind, computed, stored))
+}
+
+/// The declared format of a document, once section 7's relabel check has passed.
+#[derive(Debug, PartialEq)]
+pub enum Format {
+    V1,
+    V2,
+}
+
+/// Section 7: which walk a document gets. A document that declares VOAF 1.x and
+/// carries structure only 2.x defines (a `records` member, or an entry carrying
+/// `event_kind`, `seq` or `timestamp_us`) is rejected, never walked link-only: the
+/// declaration is a member no hash covers, and believing it would switch off
+/// every content check. A 1.x document is either the 1.0 array of entries, each
+/// declaring `voaf`, or an object declaring `voaf_version`.
+pub fn document_format(doc: &Value) -> R<Format> {
+    const V2_ONLY: [&str; 3] = ["event_kind", "seq", "timestamp_us"];
+    let (declared, entries): (Option<&str>, Vec<&Value>) = match doc {
+        Value::Array(items) => (
+            items.first().and_then(|e| e.get("voaf")).and_then(Value::as_str),
+            items.iter().collect(),
+        ),
+        Value::Object(o) => {
+            let declared = o.get("voaf_version").or_else(|| o.get("voaf")).and_then(Value::as_str);
+            let mut entries = Vec::new();
+            for list in ["records", "interactions"] {
+                if let Some(Value::Array(items)) = o.get(list) {
+                    entries.extend(items.iter());
+                }
+            }
+            (declared, entries)
+        }
+        _ => return Err(PreimageError::UndeclaredFormat),
+    };
+    let declared = declared.ok_or(PreimageError::UndeclaredFormat)?;
+    if declared.starts_with('1') {
+        if doc.get("records").is_some() {
+            return Err(PreimageError::FormatMismatch("a records member".into()));
+        }
+        for e in entries {
+            if let Some(m) = V2_ONLY.iter().find(|m| e.get(**m).is_some()) {
+                return Err(PreimageError::FormatMismatch(format!("an entry carrying {}", m)));
+            }
+        }
+        return Ok(Format::V1);
+    }
+    Ok(Format::V2)
+}
+
 /// The vectors file only (spec section 4.2.1). A vector may abbreviate a long
-/// string field as `{"$repeat": {"char": c, "count": n}}`. This returns a vector's
-/// `record` with each such field expanded, ready for `preimage`. A document is
+/// string field as `{"$repeat": {"char": c, "count": n}}`. This returns a positive
+/// vector's `record`, of the given kind, with each such field expanded, ready for
+/// `preimage`. A document is
 /// never passed through here, which is why `preimage` expands nothing: in a
 /// document the directive is an object in a scalar field, and it does not decode.
-pub fn expand_vector_record(record: &Value) -> R<Value> {
+pub fn expand_vector_record(kind: &str, record: &Value) -> R<Value> {
+    let body = schema(kind).ok_or_else(|| PreimageError::UnknownKind(kind.to_string()))?;
     let fields = record.as_object().ok_or(PreimageError::NotARecord)?;
+    // Names first: only a declared field may carry the directive, and nothing is
+    // expanded for a record that `preimage` would reject anyway.
+    for name in fields.keys() {
+        let known = ENVELOPE.contains(&name.as_str())
+            || RECORD_MEMBERS.contains(&name.as_str())
+            || body.iter().any(|(n, _, _)| n == name);
+        if !known {
+            return Err(PreimageError::UnknownMember(name.clone()));
+        }
+    }
     let mut out = serde_json::Map::new();
     for (name, v) in fields {
         out.insert(name.clone(), expand_repeat(name, v)?);
@@ -510,12 +615,14 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-/// Whether this record's own content is covered by its hash.
+/// Whether this record's own content is covered by its hash. Meaningful only for
+/// a record that has decoded.
 ///
 /// Only `interaction` records carry content. A v1 record covers none of it,
 /// which is the whole reason for 2.0, and the verifier says so per record.
 pub fn content_covered(kind: &str, rec: &Value) -> bool {
-    // Present AND non-null, as Vigil's vigil-verify has since dfba3ad.
+    // Present and a string, so not NULL, as Vigil's vigil-verify has required
+    // present and non-null since dfba3ad.
     // `Value::get` returns Some(Value::Null) for a member that is present and
     // null, so an `is_some()` here counted a record whose content had been
     // stripped to nulls as content covered by its hash. Such a record still
@@ -524,5 +631,5 @@ pub fn content_covered(kind: &str, rec: &Value) -> bool {
     kind == "interaction"
         && ["user_message", "ai_response"]
             .iter()
-            .any(|k| rec.get(*k).is_some_and(|v| !v.is_null()))
+            .any(|k| rec.get(*k).is_some_and(Value::is_string))
 }

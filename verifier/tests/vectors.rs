@@ -11,7 +11,7 @@ use voaf_reference_verifier as voaf;
 const VECTORS: &str = include_str!("../../spec/2.0/test-vectors.json");
 
 const POSITIVE: usize = 24;
-const NEGATIVE: usize = 12;
+const NEGATIVE: usize = 19;
 const CHAIN: usize = 13;
 
 fn file() -> Value {
@@ -36,7 +36,8 @@ fn by_name<'a>(d: &'a Value, name: &str) -> &'a Value {
 /// A positive vector's record, with the vector-file `$repeat` directive expanded
 /// (section 4.2.1). Only positive vectors go through here.
 fn expanded(v: &Value) -> Value {
-    voaf::expand_vector_record(&v["record"]).unwrap_or_else(|e| panic!("{}: {}", v["name"], e))
+    voaf::expand_vector_record(v["event_kind"].as_str().unwrap(), &v["record"])
+        .unwrap_or_else(|e| panic!("{}: {}", v["name"], e))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -158,9 +159,11 @@ fn violation(e: &voaf::PreimageError) -> &'static str {
     use voaf::PreimageError::*;
     match e {
         UnknownMember(_) => "unknown_member",
+        MissingField(_) => "missing_field",
         WrongType(_) => "wrong_type",
         NullField(_) => "null_field",
         NullElement(_) => "null_element",
+        FormatMismatch(_) => "format_mismatch",
         _ => "other",
     }
 }
@@ -173,22 +176,45 @@ fn every_negative_vector_fails_where_it_says() {
     for nv in ns {
         let name = nv["name"].as_str().unwrap();
         let want = nv.get("violation").and_then(Value::as_str);
+        // Where two codes are both honest, the file lists them; the reference
+        // verifier must produce the one in `violation`, and it must be listed.
+        if let Some(ok) = nv.get("acceptable_violations").and_then(Value::as_array) {
+            assert!(ok.iter().any(|c| c.as_str() == want), "{}: violation not among acceptable_violations", name);
+        }
         if let Some(text) = nv.get("record_json") {
             // The record as text, because what it tests is gone once parsed.
             assert_eq!(want, Some("duplicate_member"), "{}", name);
-            let err = voaf::parse_document(text.as_str().unwrap()).expect_err(name);
+            let text = text.as_str().unwrap();
+            let err = voaf::parse_document(text).expect_err(name);
             assert!(err.to_string().contains("is repeated in one object"), "{}: {}", name, err);
+            // Without the check, a parser that keeps one copy computes stored_hash.
+            let stored = nv["stored_hash"].as_str().unwrap();
+            let last: Value = serde_json::from_str(text).unwrap();
+            let first = first_copy_parse(text);
+            let hits = [&last, &first].iter().filter(|r| lenient_hash(r) == stored).count();
+            assert_eq!(hits, 1, "{}: exactly one of the two one-copy parsers accepts it", name);
+        } else if let Some(doc) = nv.get("document") {
+            let err = voaf::document_format(doc).expect_err(name);
+            assert_eq!(Some(violation(&err)), want, "{}: {}", name, err);
+            // Under 2.0.0 the document was walked link-only, and every link holds.
+            assert!(link_only_walk_passes(doc), "{}: the link-only walk should pass", name);
         } else if nv.get("record").is_some() {
             // A record exactly as a document carries it. Never expanded.
             let rec = &nv["record"];
-            let kind = rec["event_kind"].as_str().unwrap();
+            let stored = nv["stored_hash"].as_str().unwrap();
+            if let Some(h) = rec.get("hash").and_then(Value::as_str) {
+                assert_eq!(h, stored, "{}: the record's hash member is its stored_hash", name);
+            }
             if want == Some("hash_mismatch") {
-                let h = voaf::record_hash(kind, rec).unwrap_or_else(|e| panic!("{}: {}", name, e));
-                assert_eq!(h, nv["expected_hash"].as_str().unwrap(), "{}", name);
-                assert_ne!(h, nv["stored_hash"].as_str().unwrap(), "{}", name);
+                let (_, computed, s) = voaf::record(rec).unwrap_or_else(|e| panic!("{}: {}", name, e));
+                assert_eq!(computed, nv["expected_hash"].as_str().unwrap(), "{}", name);
+                assert_eq!(s, stored, "{}", name);
+                assert_ne!(computed, s, "{}", name);
             } else {
-                let err = voaf::preimage(kind, rec).expect_err(name);
+                let err = voaf::record(rec).expect_err(name);
                 assert_eq!(Some(violation(&err)), want, "{}: {}", name, err);
+                // Without the failing check, a lenient reader computes stored_hash.
+                assert_eq!(lenient_hash(rec), stored, "{}: stored_hash", name);
             }
         } else {
             mutation(&d, nv);
@@ -269,7 +295,7 @@ fn a_huge_repeat_count_fails_at_the_limit_without_allocating_it() {
         for count in [u64::MAX, 1 << 40, (voaf::MAX_FIELD_BYTES as u64) + 1] {
             let mut v = base.clone();
             v["record"]["user_message"] = serde_json::json!({"$repeat": {"char": ch, "count": count}});
-            let rec = voaf::expand_vector_record(&v["record"]).unwrap();
+            let rec = voaf::expand_vector_record("interaction", &v["record"]).unwrap();
             assert!(rec["user_message"].as_str().unwrap().len() <= over);
             let err = voaf::preimage("interaction", &rec).expect_err("over the limit");
             assert!(matches!(err, voaf::PreimageError::FieldTooLarge("user_message", _)), "{}", err);
@@ -288,4 +314,152 @@ fn content_stripped_to_null_is_not_covered() {
     rec["ai_response"] = Value::String(String::new());
     assert!(voaf::content_covered("interaction", &rec));
     assert!(!voaf::content_covered("lifecycle", &rec));
+}
+
+/// The v2.0.0 reading of a record, for checking each negative vector's
+/// stored_hash: unknown members, `hash` and `event_kind` ignored, an absent field
+/// read as NULL, a NULL encoded as the marker anywhere, the directive expanded.
+fn lenient_hash(rec: &Value) -> String {
+    fn put(out: &mut Vec<u8>, m: u8, p: &[u8]) {
+        out.push(m);
+        out.extend_from_slice(&(p.len() as u32).to_be_bytes());
+        out.extend_from_slice(p);
+    }
+    fn scalar(out: &mut Vec<u8>, v: &Value) {
+        match v {
+            Value::Null => out.push(0),
+            Value::String(s) => put(out, 1, s.as_bytes()),
+            Value::Number(n) => put(out, 2, n.as_i64().unwrap().to_string().as_bytes()),
+            Value::Bool(b) => put(out, 3, if *b { b"1" } else { b"0" }),
+            Value::Object(o) => {
+                let r = &o["$repeat"];
+                let c = r["char"].as_str().unwrap();
+                let n = r["count"].as_u64().unwrap();
+                assert!(n <= 4096, "only small counts here");
+                put(out, 1, c.repeat(n as usize).as_bytes())
+            }
+            Value::Array(_) => panic!("an array where a scalar is declared"),
+        }
+    }
+    let kind = rec["event_kind"].as_str().unwrap();
+    let mut out = Vec::new();
+    put(&mut out, 1, voaf::TAG.as_bytes());
+    put(&mut out, 2, voaf::field_count(kind).unwrap().to_string().as_bytes());
+    for n in ["seq", "prev_hash"] {
+        scalar(&mut out, &rec[n]);
+    }
+    put(&mut out, 1, kind.as_bytes());
+    for n in ["id", "timestamp_us"] {
+        scalar(&mut out, &rec[n]);
+    }
+    for (name, _, _) in voaf::schema(kind).unwrap() {
+        match rec.get(*name).unwrap_or(&Value::Null) {
+            Value::Array(items) => {
+                out.push(4);
+                out.extend_from_slice(&(items.len() as u32).to_be_bytes());
+                for it in items {
+                    scalar(&mut out, it);
+                }
+            }
+            v => scalar(&mut out, v),
+        }
+    }
+    sha256_hex(&out)
+}
+
+/// A parse that keeps the first copy of a repeated member name.
+fn first_copy_parse(text: &str) -> Value {
+    use serde::de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+    struct First;
+    impl<'de> DeserializeSeed<'de> for First {
+        type Value = Value;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+            d.deserialize_any(self)
+        }
+    }
+    impl<'de> Visitor<'de> for First {
+        type Value = Value;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("JSON")
+        }
+        fn visit_unit<E>(self) -> Result<Value, E> { Ok(Value::Null) }
+        fn visit_bool<E>(self, b: bool) -> Result<Value, E> { Ok(Value::Bool(b)) }
+        fn visit_i64<E>(self, n: i64) -> Result<Value, E> { Ok(n.into()) }
+        fn visit_u64<E>(self, n: u64) -> Result<Value, E> { Ok(n.into()) }
+        fn visit_f64<E>(self, n: f64) -> Result<Value, E> { Ok(n.into()) }
+        fn visit_str<E>(self, s: &str) -> Result<Value, E> { Ok(Value::String(s.to_owned())) }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<Value, A::Error> {
+            let mut v = Vec::new();
+            while let Some(x) = a.next_element_seed(First)? {
+                v.push(x);
+            }
+            Ok(Value::Array(v))
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Value, A::Error> {
+            let mut m = serde_json::Map::new();
+            while let Some(k) = a.next_key::<String>()? {
+                let v = a.next_value_seed(First)?;
+                m.entry(k).or_insert(v);
+            }
+            Ok(Value::Object(m))
+        }
+    }
+    First.deserialize(&mut serde_json::Deserializer::from_str(text)).unwrap()
+}
+
+/// The v2.0.0 1.0 walk: linkage only, each entry's prev_hash equal to the hash
+/// before it, the first to the document's genesis.
+fn link_only_walk_passes(doc: &Value) -> bool {
+    let entries = doc["interactions"].as_array().unwrap();
+    let mut prev = doc["genesis"].as_str().unwrap().to_string();
+    for e in entries {
+        if e["prev_hash"].as_str() != Some(prev.as_str()) {
+            return false;
+        }
+        prev = e["hash"].as_str().unwrap().to_string();
+    }
+    !entries.is_empty()
+}
+
+/// A genuine 1.x document is never refused: the 1.0 array of entries, and the
+/// object Vigil's 1.0 exporter wrote.
+#[test]
+fn a_genuine_1_0_document_is_not_refused() {
+    let entry = serde_json::json!({"voaf": "1.0.0", "id": "e1", "timestamp": "2026-01-01T00:00:00Z",
+        "provider": "openai", "model": "m", "direction": "request",
+        "content_hash": "sha256:00", "prev_hash": "sha256:00", "annotations": {"seq": 1}});
+    assert_eq!(voaf::document_format(&serde_json::json!([entry])).unwrap(), voaf::Format::V1);
+    let vigil = serde_json::json!({"voaf_version": "1.0", "interactions": [{"id": "a", "timestamp": "t",
+        "prev_hash": "p", "hash": "h"}]});
+    assert_eq!(voaf::document_format(&vigil).unwrap(), voaf::Format::V1);
+    let v2 = serde_json::json!({"voaf_version": "2.0", "records": []});
+    assert_eq!(voaf::document_format(&v2).unwrap(), voaf::Format::V2);
+}
+
+/// The clamp's boundary, for 1-, 2-, 3- and 4-byte characters: the largest count
+/// within 2^20 bytes encodes, and one more is rejected.
+#[test]
+fn the_repeat_limit_is_exact_for_every_character_width() {
+    let d = file();
+    let base = by_name(&d, "interaction_minimal");
+    for ch in ["A", "\u{e9}", "\u{65e5}", "\u{1f600}"] {
+        let per = ch.len();
+        let fits = (voaf::MAX_FIELD_BYTES / per) as u64;
+        for (count, ok) in [(fits, true), (fits + 1, false)] {
+            let mut v = base.clone();
+            v["record"]["user_message"] = serde_json::json!({"$repeat": {"char": ch, "count": count}});
+            let rec = voaf::expand_vector_record("interaction", &v["record"]).unwrap();
+            assert_eq!(voaf::preimage("interaction", &rec).is_ok(), ok, "{} bytes per char, count {}", per, count);
+        }
+    }
+}
+
+/// -0 is not a valid integer (section 2), and it reaches the parser as a float,
+/// so `as_i64` refuses it. Under serde_json's arbitrary_precision it would arrive
+/// as the integer 0.
+#[test]
+fn minus_zero_is_not_an_integer() {
+    let v = voaf::parse_document("-0").unwrap();
+    assert!(v.is_f64(), "{:?}", v);
+    assert!(v.as_i64().is_none());
 }

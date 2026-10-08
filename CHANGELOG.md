@@ -7,31 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 2026-10-08
 
-Minor. No preimage byte and no hash changes, and the format tag stays
-`voaf-2.0`. Every 2.0.0 vector, the chain, and every document that carries only
-what section 4 declares verify unchanged.
+Minor. No preimage byte and no hash changes, and the format tag stays `voaf-2.0`.
+
+**Compatibility, stated once:** 2.1.0 rejects documents that are malformed under
+I-JSON (RFC 7493) or that carry members or content no hash covers. It also
+enforces two rules the 2.0.0 text already stated, the section 4 nullability
+column and a declared field being present, which the 2.0.0 reference verifier
+partly left unchecked. Every document a 2.0 producer actually emitted still
+verifies, and every 2.0.0 vector and the chain reproduce unchanged. One passage
+of 2.0.0 described `client_disconnected` more broadly than any producer wrote it;
+it is corrected as an erratum, below. Section 7.1 states the rule that makes such
+a release minor.
 
 ### Security
 
-- **A 2.0.0 verifier accepts documents that carry text no hash covers. 2.1.0
-  forbids them, and no hash changes.** Under 2.0.0 a record could carry, and the
-  2.0.0 reference verifier verified:
+- **A 2.0.0 verifier accepts records that carry text no hash covers. 2.1.0
+  forbids them inside records, and no hash changes.** Under 2.0.0 a record could
+  carry, and the 2.0.0 reference verifier accepted:
   - a member no section 4 table declares, which no preimage reads;
   - a second member with the same name, of which a parser keeps one and the hash
     covers only that one;
   - the vectors-file `$repeat` directive, which the verifier expanded in any
     record, so anything written beside it or inside it was dropped before
-    hashing.
+    hashing;
+  - a `hash` member that is not a string, which can carry anything.
 
   In each case the record read as verified while carrying text outside every
-  hash. The section 2 encoding is unambiguous over decoded values, so every one
-  of these lives in the step from JSON to values, and 2.1.0 closes them there:
-  the document is parsed with no repeated member name (RFC 7493 section 2.3), a
-  record's members are exactly `seq`, `prev_hash`, `id`, `timestamp_us`,
-  `event_kind`, `hash` and its kind's fields, and an object or array where a
-  scalar is declared does not decode (`spec/2.0/preimage.md` sections 4.2.1 and
-  7). One negative vector shows each case accepted by the 2.0.0 reference
-  verifier and rejected by this one.
+  hash. The section 2 encoding is unambiguous over decoded values, so each of
+  these lives in the step from JSON to values, and 2.1.0 closes them there
+  (`spec/2.0/preimage.md` sections 4.2.1 and 7).
+- **Members outside the records stay outside every hash.** The declared format,
+  the genesis, the anchor and any exporter metadata are covered by no record
+  hash, in 2.0.0 and in 2.1.0 (section 9). The one that decides how a document is
+  walked, its declared version, is no longer taken on trust: a document that
+  declares 1.x and carries 2.x-only structure is rejected, never walked link-only
+  (section 7). Under 2.0.0 such a document, a 2.0 chain relabelled 1.0 with a
+  record altered, passed a link-only walk; Vigil's own 2.0 verifier reported it
+  verified.
+
+### Erratum
+
+- Section 4.4 of 2.0.0 said the `client_disconnected` outcome is exactly the case
+  of "a hold whose client left mid-hold", which "delivered no bytes". Both were
+  broader than any producer wrote it: a producer records `client_disconnected`
+  only when it finds the client gone, and on a streamed response the events
+  before the held call may already have been delivered. 2.1.0 corrects the text.
+  The value's meaning, that nothing was delivered for the held call, is
+  unchanged, and no producer wrote a record the corrected text does not describe.
 
 ### Added
 
@@ -53,91 +75,125 @@ what section 4 declares verify unchanged.
   `restore`), not a tool-call decision, spelled out, and what the response hash
   fields cover. "An allow" is defined: the four pairs that say the call was
   delivered.
-- Section 7: the parse check, and rule 1 as a list of its checks.
-- Section 7 rule 2: a verifier MUST NOT count or present an unrecognised
-  `decision` as an allow, and SHOULD report such records with the raw value. Raw
-  means as stored; a verifier that shows a document string to a person escapes
-  it first.
-- Section 7.1: adding a `decision` value is a minor change, and adds its row to
-  section 4.4.1. Removing one, or changing its meaning, is a major change.
+- Section 7: the parse check, the relabel check and its MUST, a 1.0 verdict that
+  never matches a 2.x verdict, rule 1 as a list of its checks with a code for
+  each, and a MUST to escape every document string a verifier shows a person.
+- Section 7 rule 2: a verifier MUST NOT count or present a record whose
+  (`verdict`, `decision`) pair it does not recognise as an allow, whether a value
+  is unknown or the pair is not one section 4.4.1 lists, and SHOULD report such
+  records with the raw values.
+- Section 7.1: adding a row to section 4.4.1, a new value or a new pair, is a
+  minor change; removing a row or changing its meaning is a major change. It
+  also says when a stricter release is minor.
+- Appendix A, known producer deviations, and appendix B, producer notes, both
+  non-normative: where Vigil 2.3.2 does not meet the section 4 definitions,
+  including the shutdown drain race, allow pairs for calls never released, and
+  the complete list of holds and calls that leave no record, and how it writes
+  the records that do.
 - Six positive vectors, one for each `decision` value no earlier vector carried:
   `shutdown_deny`, `connection_panicked`, `timeout_deny`, `user_approve`,
   `always_allow` and `restore`.
-- Eight negative vectors: a NULL `decision`, a `decision` edited without
-  re-hashing, and one for each check rule 1 and the parse check gain:
-  `neg_repeat_in_document`, `neg_unknown_member`, `neg_duplicate_member`,
-  `neg_verdict_null`, `neg_rule_id_null` and `neg_features_canonical_null`. Each
-  names the `violation` it must produce. 24 positive and 12 negative vectors in
-  all.
+- Fifteen negative vectors, each naming the `violation` it must produce: a NULL
+  `decision`; a `decision` edited without re-hashing; the parse check twice
+  (`neg_duplicate_member`, last copy kept, and `neg_duplicate_member_mirror`,
+  first copy kept); one for each rule 1 check the v2.0.0 reference verifier did
+  not make (`neg_repeat_in_document`, `neg_unknown_member`,
+  `neg_hash_not_a_string`, `neg_verdict_null`, `neg_held_ms_null`,
+  `neg_is_anomaly_null`, `neg_rule_id_null`, `neg_feature_element_null` and
+  `neg_features_canonical_null`); `neg_nullable_field_absent`, which that
+  verifier already rejected; and `neg_relabelled_1_0`, a whole document. Every
+  record-form negative carries its stored hash as `hash`. 24 positive and 19
+  negative vectors in all.
 - `verifier/`: builds `spec/2.0/reference-verifier.rs` as a library and runs
-  every vector against it, with the vector, negative and chain counts pinned. CI
-  runs it on every pull request and every push to `main`, and checks that every
-  test ran.
+  every vector against it, with the vector, negative and chain counts pinned. For
+  every negative it also shows that a reader without the failing check computes
+  the stored hash. CI runs it on every pull request and every push to `main`,
+  with a time limit, and checks that every test ran.
 
 ### Changed
 
 - Section 4.2.1: the `$repeat` directive belongs to the vectors file. A loader
   expands it in `vectors[].record` only; a document never carries it, and a
-  verifier never expands it.
+  verifier never expands it. 4.2.1 now comes before 4.2.2.
 - Section 4.4: the NULL-delivery rule is scoped to the held call, and a present
-  `response_hash_delivered` is what the producer wrote or was writing, not
-  evidence of receipt. In Vigil 2.3.2 `client_disconnected` is written only on a
-  streamed response, when a keepalive write fails, and a buffered hold record is
-  written before the body is forwarded.
-- Section 4.7.1: the shutdown drain is not atomic in Vigil 2.3.2. A hold
-  inserted as the drain runs is never recorded as `shutdown_deny`, and most often
-  has no record at all.
+  `response_hash_delivered` is what the producer had written or was writing when
+  it recorded the decision, not evidence of receipt. `client_disconnected` means
+  the producer found the client gone.
+- Section 4.7.1: the shutdown definition stands as written, and the Vigil 2.3.2
+  race, in which a hold that read the shutting-down flag before it was set and is
+  inserted after the drain is never recorded as `shutdown_deny`, is in appendix
+  A.1.
 - Section 7 rule 2: an `event_kind` is the stated exception to "an unknown token
-  is not a failure", because it selects the field table. It already was in
-  practice; the text contradicted itself.
-- Section 5.1: the re-root is the pattern for every future format tag, not every
-  major version, matching section 7.1.
-- Citations: the header names the files in this repository, says Vigil carries
-  a copy of the vectors, and says the document format is not published. Paths
+  is not a failure", because it selects the field table. Rule 2's 27-element
+  check applies to a present `features_canonical`; a NULL is rule 1's.
+- Sections 5.1 and 7.1 agree: the re-root is the pattern for every future format
+  tag.
+- Section 9 says what the response hashes record, and that members outside the
+  records are covered by no hash.
+- Section 8: criterion 1 is marked historical, criterion 3 is marked not met for
+  2.1.0, and criterion 6 says which cases v2.0.0 accepted.
+- Section 8.1 documents every member an implementation reads, and marks the rest
+  informative.
+- Citations: the header names the files in this repository, says Vigil carries a
+  revision 3 copy of the vectors and that the document format is not published,
+  defines "Vigil 2.3.2" once, and marks older Vigil citations as history. Paths
   that exist only in Vigil say so.
-- Section 8.1 documents every field of the vectors file.
 
 ### Fixed
 
 - `spec/2.0/reference-verifier.rs`:
   - Enforces section 7 rule 1 for every field from the Nullable column of the
     section 4 tables, and for every array element. The 2.0.0 file encoded a NULL
-    anywhere as the NULL marker, so a NULL `decision`, `verdict`, array element
-    or `features_canonical` verified.
-  - Rejects a member outside the record's fields, and an object or array where a
-    scalar is declared. `preimage()` expands nothing. `expand_vector_record()` is
-    the vectors-file loader, and the only place the directive is expanded.
-  - `parse_document()` parses a document and rejects a repeated member name.
+    in any body field or array element as the NULL marker, so a NULL `decision`,
+    `verdict`, `held_ms`, `is_anomaly`, array element or `features_canonical`
+    verified.
+  - Rejects a member outside the record's fields, a `hash` or `event_kind` that
+    is not a string, and an object or array where a scalar is declared.
+    `preimage()` expands nothing. `record()` decodes a record as a document
+    carries it, `hash` and `event_kind` required. `expand_vector_record()` is the
+    vectors-file loader, and the only place the directive is expanded; it checks
+    member names before it expands anything.
+  - `parse_document()` parses a document and rejects a repeated member name, and
+    refuses to run under serde_json's `arbitrary_precision`, where `-0` would read
+    as the integer 0.
+  - `document_format()` rejects a document that declares 1.x and carries 2.x-only
+    structure.
   - Clamps the `$repeat` count before allocating, as Vigil's vigil-verify has
     since `204a776`. A count of 2^63 or more panicked, and a large one allocated
     its size before the field limit was checked.
-  - `content_covered` counts content that is present and non-null, as
-    vigil-verify has since `dfba3ad`. Content stripped to nulls read as covered.
+  - `content_covered` counts content that is a present string, so not NULL, as
+    vigil-verify has required present and non-null since `dfba3ad`.
   - The unknown `event_kind` error escapes the kind in full, in both Display and
     Debug. It used Rust's `{:?}`, which passes printable non-ASCII through, so a
     lookalike of a real kind, or an invisible filler character, reached any
     caller that printed the error. The escape writes `\u{..}` for everything
     outside printable ASCII, never `\n`, `\r` or `\t`, which a shell's `echo`
     turns back into line breaks.
-  - Its header says what it is: independent of the writer, and kept in step
-    with vigil-verify, of which it began as a copy.
-- `neg_field_count_mutated` changes the count from 35 to 32, not from 33.
+  - Its header says what it is: independent of the writer, begun as a copy of
+    vigil-verify's preimage module, and ahead of vigil-verify, which gains the
+    2.1.0 checks in a later pull request.
+- `neg_field_count_mutated` changes the count from 35 to 32, not from 33. Two
+  vector notes are corrected: `connection_panicked` says panicked, and the
+  `client_disconnected` and `restore` notes match sections 4.4 and 4.4.1.
 
 ### Compatibility
 
 - A 2.0.0 verifier still verifies records carrying either new value, because
   section 7 rule 2 makes an unknown token not a failure. 2.0.0 did not say what a
   verifier may do with such a record. The section 7 addition does.
-- A document 2.1.0 rejects and 2.0.0 accepted carries an undeclared member, a
-  repeated member name, the `$repeat` directive or a NULL the section 4 tables
-  forbid. Section 2.2 already made any field outside a kind's list a new tag,
-  section 4.2.1 already confined the directive to the vectors file, and rule 1
-  already made a nullability violation a failure; 2.1.0 makes each check
-  explicit and the reference verifier enforces it. Vigil's exporter writes none
-  of them.
+- What 2.1.0 rejects that 2.0.0 accepted: a repeated member name (RFC 7493
+  section 2.3; RFC 8259 says only that names SHOULD be unique, so this check is
+  new in 2.1.0), a member outside the record's fields, the `$repeat` directive in
+  a document, a `hash` that is not a string, a 1.x declaration on a document with
+  2.x-only structure, and a NULL the section 4 tables forbid. Section 2.2 already
+  made any field outside a kind's list a new tag, section 4.2.1 already confined
+  the directive to the vectors file, and rule 1 already made a nullability
+  violation a failure. Vigil's exporter writes none of them: a real 2.0 export
+  from Vigil 2.3.2 verifies under 2.1.0's reference verifier.
 - The reference verifier's interface changed: `schema()` returns the Nullable
-  column as a third element, `preimage()` no longer expands `$repeat`, and a
-  caller loading the vectors file expands with `expand_vector_record()`.
+  column as a third element, `preimage()` no longer expands `$repeat`,
+  `expand_vector_record()` takes the kind, and `record()`, `parse_document()` and
+  `document_format()` are new.
 
 ## [2.0.0] - 2026-09-02
 

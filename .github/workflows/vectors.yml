@@ -15,6 +15,7 @@ jobs:
   reference-verifier:
     name: reference verifier, every vector
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,4 +31,4 @@ jobs:
       # that is removed, ignored or filtered cannot pass by not running.
       - name: Every test ran
         run: |
-          grep -E '^test result: ok\. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"
+          grep -E '^test result: ok\. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"
