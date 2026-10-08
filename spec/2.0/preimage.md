@@ -462,15 +462,30 @@ on this branch. That file's section 10 is informative; this table is normative.
 
 An empty `rule_ids` is a present array with count 0, not NULL.
 
-`response_hash_delivered` is NULL when nothing was delivered for the held call:
-neither the call nor anything in its place. The `client_disconnected` and
-`connection_panicked` outcomes are exactly that case: a hold whose client left
-mid-hold, or whose connection task failed while it was held. On a streamed
-response the client may already have received the events before the held call;
-what it never received is the call, and recording a delivery hash would assert a
-delivery that did not happen. A verifier must not treat a NULL there as missing
-data. `connection_panicked` also carries a NULL `response_hash_upstream`
-(section 4.7.1).
+`response_hash_delivered` is NULL when the producer wrote nothing for the held
+call: neither the call nor anything in its place. The `client_disconnected` and
+`connection_panicked` outcomes are that case. On a streamed response the client
+may already have received the events before the held call; what it never
+received is the call, and recording a delivery hash would assert a delivery that
+did not happen. A verifier must not treat a NULL there as missing data.
+`connection_panicked` also carries a NULL `response_hash_upstream` (section
+4.7.1).
+
+A present `response_hash_delivered` is what the producer wrote, or was writing,
+to the client, not evidence that the client received it (section 9). Two facts of
+Vigil 2.3.2 (the source at Vigil commit `c449787`) bound what the field shows:
+
+- `client_disconnected` is written only on a streamed response, and only when
+  the producer's keepalive write to the client fails during the hold
+  (`vigil-proxy/src/proxy.rs:2798-2801`, one write every 10 seconds). A buffered
+  response has no such check, so a buffered hold whose client left is recorded
+  under whatever decision it reached, with both hashes present. On a streamed
+  response, a client that leaves after the last keepalive is recorded the same
+  way.
+- On a buffered response the record is written before the body is forwarded to
+  the client (`proxy.rs:2226-2233`, then `:2298-2323`), and a forward that then
+  fails is only logged (`:2324-2326`). The record states what the producer was
+  about to write, and nothing on the chain says whether the write succeeded.
 
 ### 4.4.1 What each `decision` records
 
@@ -626,9 +641,23 @@ and neither is an allow (section 4.4.1).
 **`shutdown_deny`**
 
 - Written by: the producer's gate, on its own authority.
-- When: the producer is shutting down. Its shutdown sequence denies every open
-  hold before the process exits, and a hold that arrives after shutdown has begun
-  is denied as it is made.
+- When: the producer is shutting down. Its shutdown sequence denies every hold
+  in its queue when the sequence runs, and a hold offered after shutdown has begun
+  is refused as it is made and recorded as `shutdown_deny` too.
+- The race, in Vigil 2.3.2 (the source at Vigil commit `c449787`): the flag check
+  and the queue are not one step. `hold()` reads the shutting-down flag without
+  the queue's lock (`vigil-proxy/src/hold_queue.rs:137`), then takes the lock and
+  inserts the hold (`:151-158`), while `shutdown()` sets the flag and drains the
+  queue under that lock (`:237-240`). A hold that read the flag before it was set,
+  and is inserted after the drain, is neither denied nor refused, and it is never
+  recorded as `shutdown_deny`. It ends as `timeout_deny` if its hold window passes
+  before the process exits, as `client_disconnected` or `connection_panicked`, as
+  a person's decision only through a decide request the producer had already
+  accepted when it stopped accepting them (an approve then delivers the call
+  during shutdown), or, with the default 30-second window, most often with no
+  record at all, because the process exits first. A record it does get can follow
+  the `lifecycle` `shutdown` record. The absence of a `shutdown_deny` record is
+  therefore not evidence that no hold was open at shutdown.
 - Whether the held action executed: no. The producer writes deny text to the
   client in place of the tool call, the same substitution it makes for
   `user_deny`, so the client never receives the call. `response_hash_upstream`
