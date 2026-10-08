@@ -12,6 +12,7 @@
 //! Consequence, stated so nobody is surprised: a change to the preimage must be
 //! made here as well, and the vector tests are what catch a miss.
 
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -37,72 +38,89 @@ pub enum Ty {
     ArrInt,
 }
 
-/// Spec section 4. Field order and type per event kind, body only; the envelope
-/// is fields 1 to 7 and is emitted by `preimage`.
-pub fn schema(kind: &str) -> Option<&'static [(&'static str, Ty)]> {
+/// The Nullable column of the section 4 tables.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Nullable {
+    Yes,
+    No,
+}
+
+/// Envelope fields 3, 4, 6 and 7, as a record carries them. None is nullable.
+/// Fields 1 and 2 are constants, and field 5 is the kind.
+pub const ENVELOPE: [&str; 4] = ["seq", "prev_hash", "id", "timestamp_us"];
+
+/// The two members of a document record that are not decoded as fields:
+/// `event_kind`, which selects the table and must name the kind being decoded,
+/// and `hash`, the stored hash section 7 rule 3 compares against.
+pub const RECORD_MEMBERS: [&str; 2] = ["event_kind", "hash"];
+
+/// Spec section 4. Field order, type and nullability per event kind, body only;
+/// the envelope is fields 1 to 7 and is emitted by `preimage`.
+pub fn schema(kind: &str) -> Option<&'static [(&'static str, Ty, Nullable)]> {
+    use Nullable::*;
     use Ty::*;
     Some(match kind {
         "interaction" => &[
-            ("provider", Str),
-            ("model", Str),
-            ("interaction_type", Str),
-            ("conversation_ref", Str),
-            ("client_ref", Str),
-            ("user_message", Str),
-            ("user_message_sha256", Str),
-            ("user_message_length", Int),
-            ("user_message_truncated", Bool),
-            ("ai_response", Str),
-            ("ai_response_sha256", Str),
-            ("ai_response_length", Int),
-            ("ai_response_truncated", Bool),
-            ("action", Str),
-            ("scope", Str),
-            ("features_canonical", ArrInt),
-            ("risk_tier", Str),
-            ("anomaly_score_canonical", Int),
-            ("is_anomaly", Bool),
-            ("policy_action", Str),
-            ("matched_policy", Str),
-            ("blocked", Bool),
-            ("block_reason", Str),
-            ("policy_id", Str),
-            ("gate_layer", Int),
-            ("tap_certificate_id", Str),
-            ("scope_violation", Bool),
-            ("execution_gate_id", Str),
+            ("provider", Str, No),
+            ("model", Str, Yes),
+            ("interaction_type", Str, No),
+            ("conversation_ref", Str, Yes),
+            ("client_ref", Str, Yes),
+            ("user_message", Str, Yes),
+            ("user_message_sha256", Str, Yes),
+            ("user_message_length", Int, Yes),
+            ("user_message_truncated", Bool, No),
+            ("ai_response", Str, Yes),
+            ("ai_response_sha256", Str, Yes),
+            ("ai_response_length", Int, Yes),
+            ("ai_response_truncated", Bool, No),
+            ("action", Str, No),
+            ("scope", Str, No),
+            ("features_canonical", ArrInt, No),
+            ("risk_tier", Str, No),
+            ("anomaly_score_canonical", Int, Yes),
+            ("is_anomaly", Bool, No),
+            ("policy_action", Str, No),
+            ("matched_policy", Str, Yes),
+            ("blocked", Bool, Yes),
+            ("block_reason", Str, Yes),
+            ("policy_id", Str, Yes),
+            ("gate_layer", Int, Yes),
+            ("tap_certificate_id", Str, Yes),
+            ("scope_violation", Bool, No),
+            ("execution_gate_id", Str, Yes),
         ],
         "gate_decision" => &[
-            ("gate_id", Str),
-            ("interaction_id", Str),
-            ("provider", Str),
-            ("protocol", Str),
-            ("tool_call_id", Str),
-            ("tool_name", Str),
-            ("class", Str),
-            ("rule_ids", ArrStr),
-            ("verdict", Str),
-            ("decision", Str),
-            ("held_ms", Int),
-            ("snapshot_ids", ArrStr),
-            ("response_hash_upstream", Str),
-            ("response_hash_delivered", Str),
-            ("actor", Str),
-            ("policy_version", Str),
+            ("gate_id", Str, No),
+            ("interaction_id", Str, Yes),
+            ("provider", Str, No),
+            ("protocol", Str, No),
+            ("tool_call_id", Str, Yes),
+            ("tool_name", Str, Yes),
+            ("class", Str, No),
+            ("rule_ids", ArrStr, No),
+            ("verdict", Str, No),
+            ("decision", Str, No),
+            ("held_ms", Int, No),
+            ("snapshot_ids", ArrStr, No),
+            ("response_hash_upstream", Str, Yes),
+            ("response_hash_delivered", Str, Yes),
+            ("actor", Str, No),
+            ("policy_version", Str, No),
         ],
         "chain_upgrade" => &[
-            ("predecessor_format_version", Str),
-            ("predecessor_document_sha256", Str),
-            ("predecessor_record_count", Int),
-            ("predecessor_head_hash", Str),
+            ("predecessor_format_version", Str, Yes),
+            ("predecessor_document_sha256", Str, Yes),
+            ("predecessor_record_count", Int, Yes),
+            ("predecessor_head_hash", Str, Yes),
         ],
         "chain_truncation" => &[
-            ("anchor_entry_count", Int),
-            ("anchor_head_hash", Str),
-            ("observed_entry_count", Int),
-            ("observed_head_hash", Str),
+            ("anchor_entry_count", Int, No),
+            ("anchor_head_hash", Str, No),
+            ("observed_entry_count", Int, No),
+            ("observed_head_hash", Str, No),
         ],
-        "lifecycle" => &[("event", Str), ("app_version", Str), ("reason", Str)],
+        "lifecycle" => &[("event", Str, No), ("app_version", Str, No), ("reason", Str, Yes)],
         _ => return None,
     })
 }
@@ -114,21 +132,32 @@ pub fn field_count(kind: &str) -> Option<i64> {
 
 pub enum PreimageError {
     UnknownKind(String),
+    NotARecord,
+    UnknownMember(String),
+    KindMismatch,
     MissingField(&'static str),
     NullField(&'static str),
+    NullElement(&'static str),
     WrongType(&'static str),
     FieldTooLarge(&'static str, usize),
     ArrayTooLarge(&'static str, usize),
     PreimageTooLarge(usize),
     BadFeatureArity(usize),
+    BadRepeat(String),
 }
 
 impl std::fmt::Display for PreimageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownKind(k) => write!(f, "unknown event_kind \"{}\"", escaped(k)),
+            Self::NotARecord => write!(f, "the record is not a JSON object"),
+            Self::UnknownMember(m) => {
+                write!(f, "member \"{}\" is not a field of this kind", escaped(m))
+            }
+            Self::KindMismatch => write!(f, "member event_kind does not name the kind being decoded"),
             Self::MissingField(n) => write!(f, "missing field {}", n),
             Self::NullField(n) => write!(f, "field {} is null, and it is not nullable", n),
+            Self::NullElement(n) => write!(f, "an element of {} is null, and array elements never are", n),
             Self::WrongType(n) => write!(f, "field {} has the wrong type", n),
             Self::FieldTooLarge(n, l) => write!(f, "field {} is {} bytes, over the limit", n, l),
             Self::ArrayTooLarge(n, l) => write!(f, "array {} has {} elements, over the limit", n, l),
@@ -136,25 +165,26 @@ impl std::fmt::Display for PreimageError {
             Self::BadFeatureArity(l) => {
                 write!(f, "features_canonical has {} elements, expected 27", l)
             }
+            Self::BadRepeat(n) => write!(f, "vector field \"{}\" is not a well-formed $repeat directive", escaped(n)),
         }
     }
 }
 
 /// Debug is what `unwrap`, `expect` and a `main` that returns this error print,
 /// so it writes the same escaped text as Display rather than a derived form that
-/// would show the kind raw.
+/// would show a document string raw.
 impl std::fmt::Debug for PreimageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
     }
 }
 
-/// The kind is the one document string a message carries. Printable ASCII as
-/// itself, the backslash and the quote escaped, everything else as a `\u{..}`
-/// escape: never the short forms `\n`, `\r` or `\t`, which a shell's `echo`
-/// turns back into the characters they name. A caller that prints a message can
-/// then be handed neither a line break, a terminal control nor a lookalike of a
-/// real kind.
+/// A document string in a message: an unknown kind, a member name. Printable
+/// ASCII as itself, the backslash and the quote escaped, everything else as a
+/// `\u{..}` escape: never the short forms `\n`, `\r` or `\t`, which a shell's
+/// `echo` turns back into the characters they name. A caller that prints a message
+/// can then be handed neither a line break, a terminal control nor a lookalike of
+/// a real name.
 fn escaped(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -166,6 +196,97 @@ fn escaped(s: &str) -> String {
         }
     }
     out
+}
+
+/// A document that is not one JSON value, or one that repeats a member name.
+pub struct ParseError(String);
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Debug for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Parse a document's text. Section 7 rule 1 starts here: an object that
+/// repeats a member name, at any depth, does not decode (RFC 7493 section 2.3).
+/// A parser that keeps one copy of a repeated name has discarded the other before
+/// anything can look at it, so the check has to be made while parsing; a
+/// `serde_json::Value` cannot show it. Every `Value` given to `preimage` should
+/// come from here.
+pub fn parse_document(text: &str) -> Result<Value, ParseError> {
+    let mut de = serde_json::Deserializer::from_str(text);
+    let v = Strict.deserialize(&mut de).map_err(|e| ParseError(e.to_string()))?;
+    de.end().map_err(|e| ParseError(e.to_string()))?;
+    Ok(v)
+}
+
+/// Builds a `serde_json::Value` exactly as serde_json does, except that a
+/// repeated member name is an error rather than a silent overwrite.
+struct Strict;
+
+impl<'de> DeserializeSeed<'de> for Strict {
+    type Value = Value;
+    fn deserialize<D: de::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+        d.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Strict {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a JSON value")
+    }
+    fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+    fn visit_bool<E: de::Error>(self, b: bool) -> Result<Value, E> {
+        Ok(Value::Bool(b))
+    }
+    fn visit_i64<E: de::Error>(self, n: i64) -> Result<Value, E> {
+        Ok(n.into())
+    }
+    fn visit_u64<E: de::Error>(self, n: u64) -> Result<Value, E> {
+        Ok(n.into())
+    }
+    fn visit_f64<E: de::Error>(self, n: f64) -> Result<Value, E> {
+        serde_json::Number::from_f64(n)
+            .map(Value::Number)
+            .ok_or_else(|| E::custom("number out of range"))
+    }
+    fn visit_str<E: de::Error>(self, s: &str) -> Result<Value, E> {
+        Ok(Value::String(s.to_owned()))
+    }
+    fn visit_string<E: de::Error>(self, s: String) -> Result<Value, E> {
+        Ok(Value::String(s))
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element_seed(Strict)? {
+            items.push(item);
+        }
+        Ok(Value::Array(items))
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let mut members = serde_json::Map::new();
+        while let Some(name) = map.next_key::<String>()? {
+            if members.contains_key(&name) {
+                return Err(de::Error::custom(format!(
+                    "member name \"{}\" is repeated in one object",
+                    escaped(&name)
+                )));
+            }
+            let value = map.next_value_seed(Strict)?;
+            members.insert(name, value);
+        }
+        Ok(Value::Object(members))
+    }
 }
 
 type R<T> = Result<T, PreimageError>;
@@ -195,136 +316,124 @@ impl Buf {
         self.out.push(M_NULL);
     }
 
-    fn str_field(&mut self, v: Option<&str>, name: &'static str) -> R<()> {
-        match v {
-            None => {
-                self.null();
-                Ok(())
-            }
-            Some(s) => self.put(M_STR, s.as_bytes(), name),
-        }
+    fn str_field(&mut self, s: &str, name: &'static str) -> R<()> {
+        self.put(M_STR, s.as_bytes(), name)
     }
 
-    fn int_field(&mut self, v: Option<i64>, name: &'static str) -> R<()> {
-        match v {
-            None => {
-                self.null();
-                Ok(())
-            }
-            Some(n) => self.put(M_INT, n.to_string().as_bytes(), name),
-        }
+    fn int_field(&mut self, n: i64, name: &'static str) -> R<()> {
+        self.put(M_INT, n.to_string().as_bytes(), name)
     }
 
-    fn bool_field(&mut self, v: Option<bool>, name: &'static str) -> R<()> {
-        match v {
-            None => {
-                self.null();
-                Ok(())
-            }
-            Some(b) => self.put(M_BOOL, if b { b"1" } else { b"0" }, name),
-        }
+    fn bool_field(&mut self, b: bool, name: &'static str) -> R<()> {
+        self.put(M_BOOL, if b { b"1" } else { b"0" }, name)
     }
 }
 
-fn as_str<'a>(v: &'a Value, name: &'static str) -> R<Option<&'a str>> {
-    match v {
-        Value::Null => Ok(None),
-        Value::String(s) => Ok(Some(s)),
-        _ => Err(PreimageError::WrongType(name)),
-    }
+// The decoders below take a value already known not to be NULL. An object or an
+// array where the table declares a scalar is the wrong type: nothing is
+// expanded or unwrapped (section 4.2.1).
+
+fn as_str<'a>(v: &'a Value, name: &'static str) -> R<&'a str> {
+    v.as_str().ok_or(PreimageError::WrongType(name))
 }
 
-fn as_int(v: &Value, name: &'static str) -> R<Option<i64>> {
-    match v {
-        Value::Null => Ok(None),
-        Value::Number(n) => n.as_i64().map(Some).ok_or(PreimageError::WrongType(name)),
-        _ => Err(PreimageError::WrongType(name)),
-    }
+fn as_int(v: &Value, name: &'static str) -> R<i64> {
+    v.as_i64().ok_or(PreimageError::WrongType(name))
 }
 
-fn as_bool(v: &Value, name: &'static str) -> R<Option<bool>> {
-    match v {
-        Value::Null => Ok(None),
-        Value::Bool(b) => Ok(Some(*b)),
-        _ => Err(PreimageError::WrongType(name)),
-    }
-}
-
-/// Expand the vector-file repeat directive (spec 4.2.1). Real documents never
-/// carry it; the test vectors do, so oversized content stays reviewable.
-fn expand(v: &Value) -> std::borrow::Cow<'_, Value> {
-    if let Value::Object(o) = v {
-        if let Some(r) = o.get("$repeat") {
-            let c = r.get("char").and_then(Value::as_str).unwrap_or("");
-            let n = r.get("count").and_then(Value::as_u64).unwrap_or(0) as usize;
-            return std::borrow::Cow::Owned(Value::String(c.repeat(n)));
-        }
-    }
-    std::borrow::Cow::Borrowed(v)
+fn as_bool(v: &Value, name: &'static str) -> R<bool> {
+    v.as_bool().ok_or(PreimageError::WrongType(name))
 }
 
 /// Build the preimage for one record.
 ///
-/// `rec` carries the envelope fields (`seq`, `prev_hash`, `id`, `timestamp_us`)
-/// and the body fields for its kind, flat.
+/// `rec` is a record as a document carries it: the envelope fields (`seq`,
+/// `prev_hash`, `id`, `timestamp_us`) and the body fields for its kind, flat, and
+/// optionally `event_kind` and `hash`. Nothing else. Section 7 rule 1 is checked
+/// in full before a byte is emitted: the member set, every type, every
+/// nullability, every array element.
 pub fn preimage(kind: &str, rec: &Value) -> R<Vec<u8>> {
     let body = schema(kind).ok_or_else(|| PreimageError::UnknownKind(kind.to_string()))?;
     let count = field_count(kind).unwrap();
+    let members = rec.as_object().ok_or(PreimageError::NotARecord)?;
+
+    // A record carries exactly the envelope, `event_kind`, `hash` and its kind's
+    // section 4 fields. Section 2.2 makes any other field a new tag, so no
+    // voaf-2.0 record carries one, and a member no preimage reads is text no hash
+    // covers.
+    for name in members.keys() {
+        let known = ENVELOPE.contains(&name.as_str())
+            || RECORD_MEMBERS.contains(&name.as_str())
+            || body.iter().any(|(n, _, _)| n == name);
+        if !known {
+            return Err(PreimageError::UnknownMember(name.clone()));
+        }
+    }
+    // `event_kind` is field 5. A record that carries it names the kind being
+    // decoded, or the member would be text the hash does not cover.
+    if let Some(k) = members.get("event_kind") {
+        if k.as_str() != Some(kind) {
+            return Err(PreimageError::KindMismatch);
+        }
+    }
+
+    let get = |n: &'static str| -> R<&Value> {
+        let v = members.get(n).ok_or(PreimageError::MissingField(n))?;
+        Ok(v)
+    };
+    let envelope = |n: &'static str| -> R<&Value> {
+        let v = get(n)?;
+        if v.is_null() {
+            return Err(PreimageError::NullField(n));
+        }
+        Ok(v)
+    };
+
     let mut b = Buf { out: Vec::with_capacity(512) };
+    b.str_field(TAG, "tag")?;
+    b.int_field(count, "field_count")?;
+    b.int_field(as_int(envelope("seq")?, "seq")?, "seq")?;
+    b.str_field(as_str(envelope("prev_hash")?, "prev_hash")?, "prev_hash")?;
+    b.str_field(kind, "event_kind")?;
+    b.str_field(as_str(envelope("id")?, "id")?, "id")?;
+    b.int_field(as_int(envelope("timestamp_us")?, "timestamp_us")?, "timestamp_us")?;
 
-    let get = |n: &'static str| -> R<&Value> { rec.get(n).ok_or(PreimageError::MissingField(n)) };
-
-    b.str_field(Some(TAG), "tag")?;
-    b.int_field(Some(count), "field_count")?;
-    b.int_field(Some(as_int(get("seq")?, "seq")?.ok_or(PreimageError::MissingField("seq"))?), "seq")?;
-    b.str_field(
-        Some(as_str(get("prev_hash")?, "prev_hash")?.ok_or(PreimageError::MissingField("prev_hash"))?),
-        "prev_hash",
-    )?;
-    b.str_field(Some(kind), "event_kind")?;
-    b.str_field(Some(as_str(get("id")?, "id")?.ok_or(PreimageError::MissingField("id"))?), "id")?;
-    b.int_field(
-        Some(as_int(get("timestamp_us")?, "timestamp_us")?.ok_or(PreimageError::MissingField("timestamp_us"))?),
-        "timestamp_us",
-    )?;
-
-    for (name, ty) in body {
-        let raw = get(name)?;
-        let v = expand(raw);
-        // Section 7 rule 1: a field that violates its declared nullability is a
-        // hard failure. `decision` is not nullable (section 4.4). Without this a
-        // NULL decision encodes as the one-byte NULL marker, hashes, and
-        // verifies. Rule 1 covers every non-nullable field; this implementation
-        // enforces it for `decision` only. A missing `decision` already fails
-        // at `get` above.
-        if kind == "gate_decision" && *name == "decision" && v.is_null() {
-            return Err(PreimageError::NullField(name));
+    for (name, ty, nullable) in body {
+        let v = get(name)?;
+        if v.is_null() {
+            // Section 7 rule 1, from the Nullable column of the section 4 table.
+            if *nullable == Nullable::No {
+                return Err(PreimageError::NullField(name));
+            }
+            b.null();
+            continue;
         }
         match ty {
-            Ty::Str => b.str_field(as_str(&v, name)?, name)?,
-            Ty::Int => b.int_field(as_int(&v, name)?, name)?,
-            Ty::Bool => b.bool_field(as_bool(&v, name)?, name)?,
-            Ty::ArrStr | Ty::ArrInt => match &*v {
-                Value::Null => b.null(),
-                Value::Array(items) => {
-                    if items.len() > MAX_ARRAY_ELEMS {
-                        return Err(PreimageError::ArrayTooLarge(name, items.len()));
+            Ty::Str => b.str_field(as_str(v, name)?, name)?,
+            Ty::Int => b.int_field(as_int(v, name)?, name)?,
+            Ty::Bool => b.bool_field(as_bool(v, name)?, name)?,
+            Ty::ArrStr | Ty::ArrInt => {
+                let items = v.as_array().ok_or(PreimageError::WrongType(name))?;
+                if items.len() > MAX_ARRAY_ELEMS {
+                    return Err(PreimageError::ArrayTooLarge(name, items.len()));
+                }
+                if *name == "features_canonical" && items.len() != 27 {
+                    return Err(PreimageError::BadFeatureArity(items.len()));
+                }
+                b.out.push(M_ARR);
+                b.out.extend_from_slice(&(items.len() as u32).to_be_bytes());
+                for it in items {
+                    // Section 2: array elements are never NULL.
+                    if it.is_null() {
+                        return Err(PreimageError::NullElement(name));
                     }
-                    if *name == "features_canonical" && items.len() != 27 {
-                        return Err(PreimageError::BadFeatureArity(items.len()));
-                    }
-                    b.out.push(M_ARR);
-                    b.out.extend_from_slice(&(items.len() as u32).to_be_bytes());
-                    for it in items {
-                        if *ty == Ty::ArrStr {
-                            b.str_field(as_str(it, name)?, name)?;
-                        } else {
-                            b.int_field(as_int(it, name)?, name)?;
-                        }
+                    if *ty == Ty::ArrStr {
+                        b.str_field(as_str(it, name)?, name)?;
+                    } else {
+                        b.int_field(as_int(it, name)?, name)?;
                     }
                 }
-                _ => return Err(PreimageError::WrongType(name)),
-            },
+            }
         }
     }
 
@@ -336,6 +445,38 @@ pub fn preimage(kind: &str, rec: &Value) -> R<Vec<u8>> {
 
 pub fn record_hash(kind: &str, rec: &Value) -> R<String> {
     Ok(hex(&Sha256::digest(preimage(kind, rec)?)))
+}
+
+/// The vectors file only (spec section 4.2.1). A vector may abbreviate a long
+/// string field as `{"$repeat": {"char": c, "count": n}}`. This returns a vector's
+/// `record` with each such field expanded, ready for `preimage`. A document is
+/// never passed through here, which is why `preimage` expands nothing: in a
+/// document the directive is an object in a scalar field, and it does not decode.
+pub fn expand_vector_record(record: &Value) -> R<Value> {
+    let fields = record.as_object().ok_or(PreimageError::NotARecord)?;
+    let mut out = serde_json::Map::new();
+    for (name, v) in fields {
+        out.insert(name.clone(), expand_repeat(name, v)?);
+    }
+    Ok(Value::Object(out))
+}
+
+/// One vector field: unchanged unless it is an object, which must be the
+/// directive and nothing else. `char` is one Unicode scalar value and `count` a
+/// non-negative integer, and neither object has any other member.
+fn expand_repeat(name: &str, v: &Value) -> R<Value> {
+    let Value::Object(outer) = v else { return Ok(v.clone()) };
+    let bad = || PreimageError::BadRepeat(name.to_string());
+    let inner = match (outer.len(), outer.get("$repeat")) {
+        (1, Some(Value::Object(inner))) if inner.len() == 2 => inner,
+        _ => return Err(bad()),
+    };
+    let c = inner.get("char").and_then(Value::as_str).ok_or_else(bad)?;
+    if c.chars().count() != 1 {
+        return Err(bad());
+    }
+    let n = inner.get("count").and_then(Value::as_u64).ok_or_else(bad)?;
+    Ok(Value::String(c.repeat(n as usize)))
 }
 
 /// Part of the format surface, exercised by the vector tests. The binary does

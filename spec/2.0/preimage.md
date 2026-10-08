@@ -387,19 +387,35 @@ text is not retained, and a party holding the original can verify either. The
 difference between them is operational, not evidentiary, and the format does not
 record it.
 
-#### 4.2.1 The repeat directive in test vectors
+#### 4.2.1 The repeat directive belongs to the vectors file
 
-Two vectors carry content larger than is reasonable to check into a file. Where
-a vector's value is the object
+Two vectors carry content larger than is reasonable to check into a file. In a
+vector's `record`, and nowhere else, a field's value may be the object
 
 ```
 {"$repeat": {"char": "<single character>", "count": <integer>}}
 ```
 
-it denotes that character repeated `count` times, encoded UTF-8, expanded before
-hashing. "Character" means one Unicode scalar value. The **expanded** value is
-subject to the section 2.1 limits exactly as a literal value would be. This is a property of the vector file, not of the preimage or of any
-stored record. It is stated here because acceptance criterion 3 requires the
+which denotes that character repeated `count` times, encoded UTF-8. "Character"
+means one Unicode scalar value, and `count` is a non-negative integer. The object
+has exactly the one member `$repeat`, and its value has exactly the members
+`char` and `count`. The **expanded** value is subject to the section 2.1 limits
+exactly as a literal value would be.
+
+This is a property of the vectors file, not of the preimage or of any stored
+record. A loader for the vectors file expands the directive in `vectors[].record`
+before the record is decoded, and nowhere else: not in `negative_vectors[]`,
+whose records are written as a document carries them.
+
+**A document never carries the directive, and a verifier never expands it.** In
+a document it is a JSON object in a field section 4 declares a string, and an
+object or an array where a section 4 table declares a string, an integer or a
+bool does not decode (section 7 rule 1). A verifier that expanded it in a
+document would hash the expansion and nothing else, so any member written beside
+`$repeat`, or inside it, would be text no hash covers. `neg_repeat_in_document`
+is that case.
+
+The directive is specified here because acceptance criterion 3 requires the
 reference verifier to be written from this document alone, and without this
 paragraph two vectors cannot be evaluated from it.
 
@@ -710,12 +726,35 @@ first.
 
 ## 7. Verification
 
+The document is parsed first. Its text is one JSON value in which no object, at
+any depth, repeats a member name (RFC 7493 section 2.3). A parser that keeps one
+of two members with the same name has already discarded the other, and the copy
+it discards is text no hash covers, so this is checked while parsing, never on the
+parsed value. A document that repeats a member name does not verify, and none of
+its records is walked. `neg_duplicate_member` is that case.
+
 For each record in `seq` order:
 
-1. Decode every field into its declared type. A field that does not decode, that
-   violates its declared nullability, or whose `u32be` length or count header
-   exceeds a section 2.1 limit, is a hard failure at that index. This check is on
-   the header, never on the value of a `_length` field.
+1. Decode every field into its declared type. Each of these is a hard failure at
+   that index:
+   - a member other than `seq`, `prev_hash`, `id`, `timestamp_us`, `event_kind`,
+     `hash` and the fields section 4 declares for the record's kind. Section 2.2
+     makes any other field a new tag, so no `voaf-2.0` record carries one, and a
+     member no preimage reads is text no hash covers. The VOAF 1.x rule that a
+     verifier ignores a field it does not know does not carry over to 2.x;
+   - a value of the wrong type: a JSON object or array where the table declares a
+     string, an integer or a bool, a non-array where it declares an array, or an
+     element that is not of the declared element type. Nothing in a document is
+     expanded or unwrapped (section 4.2.1);
+   - a NULL in a field the table marks not nullable, the envelope fields and
+     `features_canonical` included, and a NULL array element (section 2);
+   - a `u32be` length or count header that exceeds a section 2.1 limit. This
+     check is on the header, never on the value of a `_length` field.
+
+   The parse check and the first two of these close the ways a document could
+   carry text that no record hash covers. None of the four changes a preimage
+   byte. The section 2 encoding is unambiguous over decoded values, and these
+   checks only decide which documents decode.
 2. A record whose `event_kind` has no schema in this document is a hard failure
    at that index. It is never skipped. So is an `interaction` whose
    `features_canonical` does not hold exactly 27 elements, and any record whose
@@ -797,7 +836,11 @@ should report it. A 2.0.0 verifier is bound only by rule 2 itself.
 6. A verifier hard-fails a `u32be` length header above 2^20 and an array count
    header above 2^16. The `negative_vectors` array in the companion vectors file
    carries a case for each, alongside the tag-mutation and field-count-mutation
-   cases that exercise criterion 4.
+   cases that exercise criterion 4. From revision 4 it also carries a case for
+   the section 7 parse check and for each section 7 rule 1 check, each naming the
+   `violation` it must produce, and a decision edited without re-hashing, which
+   rule 3 fails. The v2.0.0 reference verifier accepts every rule 1 and parse
+   case, with its `stored_hash`.
 7. The exporter emits every preimage input for every record. Criteria 2 and 3
    pass against a document produced by the shipped exporter, not only against the
    checked-in vectors.
@@ -810,7 +853,7 @@ than left to be inferred.
 
 | Field | Meaning |
 | --- | --- |
-| `vectors[].record` | The record's fields, keyed by the names in section 4 |
+| `vectors[].record` | The record's fields, keyed by the names in section 4. The only place the section 4.2.1 directive may appear; a loader expands it before decoding |
 | `vectors[].event_kind` | The kind, selecting the section 4 table |
 | `vectors[].expected_hash` | `SHA256` of the preimage, and the value section 7 rule 4 calls the stored hash |
 | `vectors[].preimage_sha256` | `SHA256` of the preimage bytes, always present |
@@ -820,8 +863,10 @@ than left to be inferred.
 | `chain.genesis_case_index` | Index into `genesis.cases` of the nonce anchoring the chain |
 | `chain.head_hash`, `chain.entry_count` | The walk's expected head and length |
 | `negative_vectors[]` | Inputs that must not verify, or mutations whose hash must move |
-| `negative_vectors[].record` | Present from revision 4: a whole record that must fail section 7 at that record. `neg_decision_null` fails rule 1 before any hash is computed |
-| `negative_vectors[].stored_hash` | The hash a document carries for `record`. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In `neg_decision_null`, it is what an encoder that accepts the NULL would compute, so only rule 1 rejects the record |
+| `negative_vectors[].record` | Present from revision 4: a whole record, exactly as a document carries it and never expanded, that must fail section 7 at that record |
+| `negative_vectors[].record_json` | Present from revision 4: a record as JSON text, for a case a parsed object cannot hold. `neg_duplicate_member` fails the section 7 parse check before any record is decoded |
+| `negative_vectors[].violation` | Present from revision 4 on every vector that carries `record` or `record_json`: the check it fails. `duplicate_member` is the section 7 parse check; `unknown_member`, `wrong_type`, `null_field` and `null_element` are rule 1; `hash_mismatch` is rule 3 |
+| `negative_vectors[].stored_hash` | The hash a document carries for the record. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In every other vector, it is what an encoder without the failing check computes, the v2.0.0 reference verifier among them, so only that check rejects the record |
 | `revision_4` | What revision 4 added to this file |
 
 **Chain membership is `chain_member`, not prose.** Walk exactly the vectors

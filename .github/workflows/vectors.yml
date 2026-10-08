@@ -1,0 +1,33 @@
+# Runs every vector in spec/2.0/test-vectors.json against the reference
+# verifier. No paths filter: a required check that never reports would hold a
+# pull request open forever.
+name: vectors
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-verifier:
+    name: reference verifier, every vector
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: cargo --version && rustc --version
+      - name: Run every vector
+        working-directory: verifier
+        run: |
+          set -o pipefail
+          cargo test --locked --test vectors 2>&1 | tee "$RUNNER_TEMP/vectors.log"
+      # The tests pin the vector counts. This pins the test count, so a test
+      # that is removed, ignored or filtered cannot pass by not running.
+      - name: Every test ran
+        run: |
+          grep -E '^test result: ok\. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"

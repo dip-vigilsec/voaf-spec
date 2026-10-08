@@ -1,0 +1,16 @@
+[package]
+name = "voaf-reference-verifier"
+version = "2.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Builds spec/2.0/reference-verifier.rs as a library so every vector in spec/2.0/test-vectors.json runs against it"
+
+[lib]
+name = "voaf_reference_verifier"
+path = "../spec/2.0/reference-verifier.rs"
+
+[dependencies]
+serde = "1"
+serde_json = "1"
+sha2 = "0.10"
