@@ -2,7 +2,7 @@
   "spec": "VOAF 2.0 preimage test vectors",
   "revision": 4,
   "supersedes": "revisions 1 and 2. Revision 1 had three proven collision classes. Revision 2 typed the NULL marker; the owner ruled NULL stays one byte and criterion 4 is reworded instead.",
-  "revision_4": "Spec release 2.1.0. Adds six positive gate_decision vectors, one for every decision token no earlier vector carried (shutdown_deny, connection_panicked, timeout_deny, user_approve, always_allow, restore), and fifteen negative vectors: a null decision, a decision edited without re-hashing, the section 7 parse check twice (the last and the first copy kept), one for each section 7 rule 1 check the v2.0.0 reference verifier did not make (the $repeat directive in a document, a member outside the record's fields, a hash that is not a string, and a NULL in a string, integer and bool field, in a string and an integer array element, and in features_canonical), a nullable field left out, and a 2.0 chain relabelled 1.0. Every record-form negative carries its stored hash as hash. Vigil 2.3.2 in the notes means the source at Vigil commit c449787, which is not tagged. No revision 3 record, hash or chain value changed; one mutation description and two notes were corrected.",
+  "revision_4": "Spec release 2.1.0. Adds six positive gate_decision vectors, one for every decision token no earlier vector carried (shutdown_deny, connection_panicked, timeout_deny, user_approve, always_allow, restore), and fifteen negative vectors: a null decision, a decision edited without re-hashing, the section 7 parse check twice (the last and the first copy kept), one for each section 7 rule 1 check the v2.0.0 reference verifier did not make (the $repeat directive in a document, a member outside the record's fields, a hash that is not a string, and a NULL in a string, integer and bool field, in a string and an integer array element, and in features_canonical), a nullable field left out, and a 2.0 chain relabelled 1.0. Every record-form negative carries its stored hash as hash, except neg_hash_not_a_string, whose hash member is the object under test. Vigil 2.3.2 in the notes means the source at Vigil commit c449787, which is not tagged. No revision 3 record, hash or chain value changed; one mutation description and three notes were corrected.",
   "generated_for": "spec/2.0/preimage.md",
   "hash": "sha256",
   "repeat_directive": {
@@ -838,7 +838,7 @@
     {
       "name": "gate_decision_client_disconnected",
       "event_kind": "gate_decision",
-      "note": "A hold whose client disconnected mid-hold. response_hash_delivered is NULL because nothing was delivered; recording a delivery hash here would assert a delivery that did not happen. Contrast gate_decision_deny, where the producer wrote deny text in place of the call and both hashes are present and differ.",
+      "note": "A hold whose client disconnected mid-hold. response_hash_delivered is NULL because nothing was delivered for the held call; recording a delivery hash here would assert a delivery that did not happen. Contrast gate_decision_deny, where the producer wrote deny text in place of the call and both hashes are present and differ.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1923,9 +1923,13 @@
           }
         ]
       },
-      "expected_outcome": "hard failure before any record is walked. The document declares 1.x and its entries carry event_kind, seq and timestamp_us, structure only 2.x defines (section 7). Walked link-only as 1.0, every prev_hash links to the stored hash before it and the document passes, though record 2's content was altered: the declaration, a member no hash covers, would switch off every content check.",
-      "requirement": "section 7: a document that declares 1.x and carries 2.x-only structure is rejected, never walked link-only",
-      "violation": "format_mismatch"
+      "expected_outcome": "hard failure before any record is decoded. The document declares 1.x and its entries carry event_kind, seq and timestamp_us, structure only 2.x defines, so the 2.x-structure check rejects it (section 7). A verifier without that check passes it under Vigil's 1.0 walk, which compares each prev_hash with the previous entry's stored hash and does not anchor the first entry, though record 2's content was altered. Under the README's 1.0 walk, which anchors entry 0 to the all-zero hash, it fails at a link instead (link_break). Either way it is not verified, and a 1.0 verdict would assert nothing about content.",
+      "requirement": "section 7: a document that declares 1.x and carries 2.x-only structure is rejected; the protection when a relabelled document carries none is the 1.0 verdict, which never asserts content integrity",
+      "violation": "format_mismatch",
+      "acceptable_violations": [
+        "format_mismatch",
+        "link_break"
+      ]
     }
   ]
 }

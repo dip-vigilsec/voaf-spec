@@ -1,4 +1,5 @@
-//! The VOAF 2.0 preimage, implemented from `spec/2.0/preimage.md`.
+//! The VOAF 2.0 reference verifier: the preimage of `spec/2.0/preimage.md`, and
+//! the section 7 checks on a document and its records.
 //!
 //! Deliberately NOT shared with the writer.
 //!
@@ -14,8 +15,7 @@
 //! (`vigil-verify/src/voaf.rs`), so agreement between the two is one lineage
 //! agreeing with itself. vigil-verify does not yet make the 2.1.0 checks this
 //! file makes: the parse check, the closed member set, rule 1 for every field,
-//! the `hash` and `event_kind` members, and the 1.x relabel check. It gains them
-//! in a later pull request.
+//! and the 1.x relabel check. It gains them in a later pull request.
 //!
 //! Consequence, stated so nobody is surprised: a change to the preimage must be
 //! made here as well, and the vector tests are what catch a miss.
@@ -233,11 +233,15 @@ impl std::fmt::Debug for ParseError {
 /// come from here.
 ///
 /// Build this file with serde_json's default number handling. Under its
-/// `arbitrary_precision` feature a number outside i64 and u64 reaches the visitor
-/// as a one-member map, which `visit_map` refuses below, and `-0` reaches it as
-/// the integer 0, which section 2 forbids; the harness checks that `-0` arrives
-/// as a float.
+/// `arbitrary_precision` feature `-0` reads as the integer 0, which section 2
+/// forbids, and a number outside i64 and u64 reaches the visitor as a map, so
+/// this refuses to parse at all when serde_json is built that way.
 pub fn parse_document(text: &str) -> Result<Value, ParseError> {
+    if !serde_json::from_str::<Value>("-0").map(|v| v.is_f64()).unwrap_or(false) {
+        return Err(ParseError(
+            "serde_json is built with arbitrary_precision, which this parser does not support".into(),
+        ));
+    }
     let mut de = serde_json::Deserializer::from_str(text);
     let v = Strict.deserialize(&mut de).map_err(|e| ParseError(e.to_string()))?;
     de.end().map_err(|e| ParseError(e.to_string()))?;
@@ -372,8 +376,8 @@ fn as_bool(v: &Value, name: &'static str) -> R<bool> {
 ///
 /// `rec` carries the envelope fields (`seq`, `prev_hash`, `id`, `timestamp_us`)
 /// and the body fields for its kind, flat, and optionally `event_kind` and `hash`;
-/// nothing else. A vector's record carries neither of the two; a document's
-/// record carries both, and `record()` requires them. The member set is checked
+/// nothing else. A positive vector's record carries `event_kind` and no `hash`;
+/// a document's record carries both, and `record()` requires them. The member set is checked
 /// first; the type, nullability and limit checks run field by field in section 4
 /// order, so a record with several defects reports the first, and no preimage is
 /// returned unless every check passes.
@@ -514,6 +518,9 @@ pub enum Format {
 pub fn document_format(doc: &Value) -> R<Format> {
     const V2_ONLY: [&str; 3] = ["event_kind", "seq", "timestamp_us"];
     let (declared, entries): (Option<&str>, Vec<&Value>) = match doc {
+        // The array of entries is 1.0's shape, and an empty one is an empty 1.0
+        // document: section 7 reports it `empty`.
+        Value::Array(items) if items.is_empty() => return Ok(Format::V1),
         Value::Array(items) => (
             items.first().and_then(|e| e.get("voaf")).and_then(Value::as_str),
             items.iter().collect(),

@@ -5,9 +5,11 @@ is tagged. Owner: C-store.
 Companion vectors: `spec/2.0/test-vectors.json` (revision 4), in this repository.
 Vigil carries a revision 3 copy at `docs/specs/voaf-2.0-test-vectors.json`.
 Companion reference verifier: `spec/2.0/reference-verifier.rs`, which
-`verifier/tests/vectors.rs` runs against every vector. It is Vigil's verifier
-code, not a verifier written from this document; acceptance criterion 3 asks for
-one of those, and none is published (section 8).
+`verifier/tests/vectors.rs` runs against every vector. It began as the preimage
+module of Vigil's vigil-verify and is now ahead of it: vigil-verify gains these
+2.1.0 checks in a later pull request. It is not a verifier written from this
+document; acceptance criterion 3 asks for one of those, and none is published
+(section 8).
 Companion document format: `voaf-2.0-document.md`, owned by C-verify. It is not
 published; section 7 states what a verifier requires of a document.
 Supersedes, for 2.x, the 1.0 hash computation: the Hash Chain Verification
@@ -56,7 +58,7 @@ that vocabulary is versioned (section 7), lists where Vigil 2.3.2 does not meet
 the definitions (appendix A), and fixes the citations. The reference verifier
 enforces all of section 7 rule 1 and the relabel check, and the vectors file gains
 six positive and fifteen negative vectors. No revision 3 record, hash or chain
-value changed; one mutation description and two vector notes were corrected.
+value changed; one mutation description and three vector notes were corrected.
 
 ## 1. Why this replaces the v1 construction
 
@@ -562,16 +564,17 @@ SHA-256 of the file at that path before the restore, NULL when no file could be
 read there, and `response_hash_delivered` is the SHA-256 of the snapshot content
 written over it. `verdict` `allow` means only that the restore went ahead.
 
-**The response hashes on every other pair.** `response_hash_upstream` is the
-SHA-256 of the upstream response as the producer had received it when it
-recorded the decision. `response_hash_delivered` is as section 4.4 says: the
+**The response hashes on every other pair**, where section 4.4 or 4.7.1 does not
+make them NULL. `response_hash_upstream` is the SHA-256 of the upstream response
+as the producer had received it when it recorded the decision. `response_hash_delivered` is as section 4.4 says: the
 SHA-256 of what the producer had written, or was writing, to the client for that
 response when it recorded the decision, and NULL when it never wrote anything for
 the decided call. Neither shows that the client received anything (section 9).
 
 A pair this table does not list has no meaning in this release; section 7 rule 2
-says how a verifier treats it. Appendix A lists where Vigil 2.3.2 does not meet
-these definitions, and appendix B describes how it writes the records that do.
+says how a verifier treats it. Appendix A lists where Vigil releases do not meet
+these definitions, and appendix B describes how Vigil 2.3.2 writes the records
+that do.
 
 ### 4.5 `chain_upgrade`, fields 8 to 11
 
@@ -638,25 +641,24 @@ and neither is an allow (section 4.4.1).
 - Written by: the producer's gate, on its own authority.
 - When: the producer is shutting down. Its shutdown sequence denies every hold
   in its queue when the sequence runs, and a hold offered after shutdown has begun
-  is refused as it is made and recorded as `shutdown_deny` too. Vigil 2.3.2 does
-  not meet this for a hold offered as the sequence begins (appendix A.1).
+  is refused as it is made and recorded as `shutdown_deny` too.
 - Whether the held action executed: no. The producer writes deny text to the
   client in place of the tool call, the same substitution it makes for
   `user_deny`, so the client never receives the call. `response_hash_upstream`
   and `response_hash_delivered` are both present, and they differ.
-- Where it lands: the connection task records it while the producer shuts down,
-  so a `shutdown_deny` record can follow the `lifecycle` `shutdown` record, can
+- Where it lands: the producer records it while it shuts down, so a
+  `shutdown_deny` record can follow the `lifecycle` `shutdown` record, can
   fall after the head anchor (the unanchored tail of section 6), and is absent if
   the process ends before the task records it.
 
 **`connection_panicked`**
 
-- Written by: the producer's connection supervisor, not the gate's decision path.
+- Written by: the producer, outside the path that decides holds.
 - When: the task serving the client connection panicked while the hold was still
-  open and undecided. The supervisor removes each hold still in the producer's
-  queue for that connection, so no later decision can act on it, and records it.
-  A hold the task had already resolved but not yet recorded is no longer in the
-  queue; appendix A.3 lists the holds Vigil 2.3.2 loses this way.
+  open and undecided. The producer removes each hold still open on that
+  connection, so no later decision can act on it, and records it. A hold already
+  resolved but not yet recorded is not open, and is not recorded as
+  `connection_panicked`.
 - Whether the held action executed: no. The task that held the call and the
   client connection is gone. The call is never written to the client, and the
   client sees its connection close. `response_hash_upstream` and
@@ -838,12 +840,16 @@ copy and for one that keeps the first.
 
 Then the document's format is settled. Its declared version, `voaf_version`, or
 `voaf` on each entry of a 1.0 array of entries, is a member no hash covers, and it
-decides whether content is checked at all, so it is not taken on trust. A
-document that declares 1.x and carries structure only 2.x defines, a `records`
-member or an entry carrying `event_kind`, `seq` or `timestamp_us`, MUST be
-rejected, and is never walked link-only (`format_mismatch`). `neg_relabelled_1_0`
-is that case. No 1.0 document carries any of these: the 1.0 schema forbids them
-on an entry, and Vigil's 1.0 exporter wrote none.
+decides whether content is checked at all. A verifier cannot always detect a
+relabelled 2.x document: one stripped of every member only 2.x defines reads as a
+1.0 document. The protection is the 1.0 verdict, which never asserts content
+integrity (below). What a verifier can detect, it MUST reject: a document that
+declares 1.x and carries structure only 2.x defines, a `records` member or an
+entry carrying `event_kind`, `seq` or `timestamp_us`, is rejected and never walked
+link-only (`format_mismatch`). No 1.0 document carries any of these: the 1.0
+schema forbids them on an entry, and Vigil's 1.0 exporter wrote none.
+`neg_relabelled_1_0` is that case; a verifier without this check may reject it
+first at a link instead (`link_break`), depending on its 1.0 walk.
 
 The checks below constrain records. Every member outside the records, the
 declared format and the genesis among them, is covered by no record hash
@@ -876,8 +882,8 @@ For each record in `seq` order:
      `_length` field.
 
    `event_kind` names the record's kind. `hash` is the record's stored hash, the
-   value rules 3 and 4 use. The parse check and the first three of these close
-   the ways a record could carry text that no record hash covers. None of these
+   value rules 3 and 4 use. The parse check, the member check and the type check
+   close the ways a record could carry text that no record hash covers. None of these
    checks changes a preimage byte. The section 2 encoding is unambiguous over
    decoded values, and these checks only decide which documents decode.
 2. A record whose `event_kind` has no schema in this document is a hard failure
@@ -906,7 +912,8 @@ For each record in `seq` order:
    person, so that a document cannot forge or hide the verifier's own output.
 3. Recompute the preimage from the record's own fields, `SHA256` it, and compare
    to the stored hash, the record's `hash` member (`hash_mismatch`).
-4. Check `prev_hash` equals the previous record's **stored** hash.
+4. Check `prev_hash` equals the previous record's **stored** hash
+   (`link_break`).
 
 Additionally:
 
@@ -929,9 +936,9 @@ record after the hole. The verifier says "break at or before index N", not
 "record N was tampered".
 
 A 2.x verifier reading a 1.0 document verifies linkage only and states that
-content was not covered. A 1.0 verdict never matches a 2.x verdict: a verifier
-MUST NOT report a 1.0 document, in any output, with a verdict a 2.x document can
-also receive.
+content was not covered. A 1.0 verdict never asserts content integrity, and
+never matches a 2.x verdict: a verifier MUST NOT report a 1.0 document, in any
+output, with a verdict a 2.x document can also receive.
 
 ### 7.1 Versioning the `gate_decision` vocabulary
 
@@ -945,13 +952,17 @@ field order or a field type. A major release under this section does not re-root
 the chain either; the section 5.1 pattern belongs to a new tag.
 
 A release that changes no preimage byte is also minor when the only documents it
-newly rejects are malformed under I-JSON (RFC 7493), carry members or content no
-record hash covers, or break a rule an earlier release already stated but its
-reference verifier did not enforce. Every document a 2.0 producer actually emitted
-still verifies under such a release. Spec release 2.1.0 is one: it rejects a
-repeated member name, a member outside the record's fields, the vectors-file
-directive in a document, a `hash` that is not a string, a 1.x declaration on a
-2.x document, and a NULL or a missing field the section 4 tables already forbade.
+newly rejects repeat a member name (RFC 7493 section 2.3), have records that carry
+members or content no record hash covers, or break a rule an earlier release
+already stated, the 1.0 schema included, that its reference verifier did not
+enforce. Members outside the records stay outside every hash, so they are not a
+ground for rejection. Spec release 2.1.0 is such a release. It rejects a repeated
+member name; a member outside the record's fields, the vectors-file directive in a
+document and a `hash` that is not a string, each text no record hash covers; and a
+NULL the section 4 tables forbade, a missing field 2.0.0's rule 1 already failed
+(a field that is absent does not decode), and a 1.x declaration on entries the 1.0
+schema forbids, each a rule already stated. Every document a 2.0 producer actually
+emitted still verifies under 2.1.0: a real export from Vigil 2.3.2 does.
 
 **Erratum.** 2.0.0 said, in section 4.4, that the `client_disconnected` outcome
 is exactly the case of "a hold whose client left mid-hold", which "delivered no
@@ -997,14 +1008,15 @@ itself.
    carries a case for each, alongside the tag-mutation and field-count-mutation
    cases that exercise criterion 4; these revision 3 cases name no `violation`.
    From revision 4 it also carries a case for the section 7 parse check, for the
-   relabel check, and for each section 7 rule 1 check the v2.0.0 reference
-   verifier did not make, each naming the `violation` it must produce; a decision
-   edited without re-hashing, which rule 3 fails; and a nullable field left out,
-   which the v2.0.0 reference verifier already rejected though no text required
-   it. Each rule 1 and parse case is accepted, with its `stored_hash`, by a reader
-   without the check: the v2.0.0 reference verifier, or for a repeated name a
-   parser keeping the copy the vector names. Vigil's own 2.0 verifier reports the
-   relabel case verified.
+   2.x-structure check, and for each section 7 rule 1 check without which a record
+   could verify, each naming the `violation` it must produce; a decision edited
+   without re-hashing, which rule 3 fails; and a nullable field left out, which
+   2.0.0's rule 1 already failed and its reference verifier already rejected. The
+   checks that `event_kind` and `hash` are present, and that `event_kind` is a
+   string, have no case: without them a verifier cannot pick a table or compare a
+   hash, so it rejects the record anyway. Each case's `stored_hash` is what a
+   reader without its check computes, and section 8.1 says which reader that is.
+   Vigil's own 2.0 verifier reports the relabel case verified.
 7. The exporter emits every preimage input for every record. Criteria 2 and 3
    pass against a document produced by the shipped exporter, not only against the
    checked-in vectors.
@@ -1018,7 +1030,7 @@ specified here, and the rest are marked informative.
 | Field | Meaning |
 | --- | --- |
 | `vectors[].name`, `negative_vectors[].name` | The vector's name, which `basis` and the prose cite |
-| `vectors[].record` | The record's fields, keyed by the names in section 4. It carries neither `event_kind` nor `hash`. The only place a loader expands the section 4.2.1 directive, before decoding |
+| `vectors[].record` | The record's fields, keyed by the names in section 4. It carries `event_kind`, equal to `vectors[].event_kind`, and no `hash`. The only place a loader expands the section 4.2.1 directive, before decoding |
 | `vectors[].event_kind` | The kind, selecting the section 4 table |
 | `vectors[].expected_hash` | `SHA256` of the preimage, and the record's stored hash in the chain walk |
 | `vectors[].preimage_sha256` | `SHA256` of the preimage bytes, always present |
@@ -1039,10 +1051,10 @@ specified here, and the rest are marked informative.
 | `negative_vectors[].record` | Present from revision 4: a whole record exactly as a document carries it, `event_kind` and `hash` included, never expanded, that must fail section 7 at that record. In it, an object shaped like the section 4.2.1 directive is a literal value |
 | `negative_vectors[].record_json` | Present from revision 4: a record as JSON text, for a case a parsed object cannot hold. It fails the section 7 parse check |
 | `negative_vectors[].document` | Present from revision 4: a whole document, for a check made before any record. `neg_relabelled_1_0` fails the section 7 relabel check |
-| `negative_vectors[].violation` | Present from revision 4 on every vector that carries `record`, `record_json` or `document`: the check it fails, by the code section 7 gives it. Used here: `duplicate_member`, `format_mismatch`, `unknown_member`, `missing_field`, `wrong_type`, `null_field`, `null_element` and `hash_mismatch`. Section 7 also defines `over_limit`, `unknown_kind` and `feature_arity` |
-| `negative_vectors[].acceptable_violations` | Present where two codes are both honest: every code a conforming verifier may produce. `violation` is one of them, the one the reference verifier produces |
-| `negative_vectors[].stored_hash` | The hash the record's `hash` member carries. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In every other vector it is what a reader without the failing check computes: for a repeated name, a parser that keeps the last copy (`neg_duplicate_member`) or the first (`neg_duplicate_member_mirror`); for a missing field, a reader that takes it as NULL; otherwise the v2.0.0 reference verifier. So only that check rejects the record |
-| `spec`, `revision`, `supersedes`, `generated_for`, `revision_4`, `hash`, `markers`, `limits`, `repeat_directive`, `feature_slots`, `chain.note`, `chain.membership` | Informative: this file's history, and restatements of sections 2, 2.1, 3 and 4.2.1. `limits.max_content_bytes` is the section 2.1 per-field limit, which applies to every string and integer field, not content only |
+| `negative_vectors[].violation` | Present from revision 4 on every vector that carries `record`, `record_json` or `document`: the check it fails, by the code section 7 gives it. Used here: `duplicate_member`, `format_mismatch`, `unknown_member`, `missing_field`, `wrong_type`, `null_field`, `null_element`, `hash_mismatch` and `link_break`. Section 7 also defines `over_limit`, `unknown_kind` and `feature_arity` |
+| `negative_vectors[].acceptable_violations` | Present where a verifier that lacks the vector's check still rejects it at another: every code a verifier may then report. `violation` is the vector's own check, the one the reference verifier produces |
+| `negative_vectors[].stored_hash` | The hash the record's `hash` member carries. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In every other vector it is what a reader without the failing check computes: for a repeated name, a parser that keeps the last copy (`neg_duplicate_member`) or the first (`neg_duplicate_member_mirror`); for a missing field, a reader that takes it as NULL; for a non-string `hash`, the v2.0.0 reference verifier, which never reads it; otherwise the v2.0.0 reference verifier. So only that check rejects the record, except where `acceptable_violations` names a second |
+| `spec`, `revision`, `supersedes`, `generated_for`, `revision_4`, `hash`, `markers`, `limits`, `repeat_directive`, `feature_slots`, `genesis.construction`, `genesis.cases[].note`, `chain.note`, `chain.membership` | Informative: this file's history, and restatements of sections 2, 2.1, 3 and 4.2.1. `limits.max_content_bytes` is the section 2.1 per-field limit, which applies to every string and integer field, not content only |
 
 `neg_tag_mutated` writes the tag `voaf-2.1` only to show that the hash moves
 with the tag. Spec release 2.1.0 keeps the tag `voaf-2.0` (section 2.2).
@@ -1099,10 +1111,10 @@ the failure this feature exists to prevent.
 
 ## Appendix A. Known producer deviations
 
-Non-normative. Where Vigil 2.3.2 does not meet a definition in sections 4.4,
-4.4.1 or 4.7.1, or leaves a decision with no record. A verifier reads a record by
-those definitions, not by this list; the list says where Vigil's records and the
-definitions part.
+Non-normative. Where a Vigil release does not meet a definition in sections 4.4,
+4.4.1 or 4.7.1, or leaves a decision with no record. A.1 to A.3 are Vigil 2.3.2;
+A.4 is Vigil 2.3.0 and 2.3.1. A verifier reads a record by those definitions, not
+by this list; the list says where Vigil's records and the definitions part.
 
 ### A.1 The shutdown drain race
 
@@ -1140,8 +1152,13 @@ section 4.4 NULL rule.
 
 ### A.3 Holds and calls that leave no record
 
-In Vigil 2.3.2 each of these leaves no `gate_decision` record of any kind:
+In Vigil 2.3.2 each of these leaves no `gate_decision` record of any kind. They
+are every loss path found by reading the source at `c449787`; the list is not
+proven complete.
 
+- any decision whose write to the store fails without a panic, the
+  `connection_panicked` flush included: it is logged as an audit gap and no row is
+  written;
 - a hold already resolved but not yet recorded when its connection task panics,
   whether a decide request, the hold window, a failed keepalive or the shutdown
   drain resolved it;
@@ -1149,11 +1166,40 @@ In Vigil 2.3.2 each of these leaves no `gate_decision` record of any kind:
   panics and before the supervisor's flush;
 - a hold parked outside a connection task, which the flush never reaches, and a
   hold whose own record panics while it is flushed;
+- a hold refused because shutdown had begun, if its task panics before it records
+  it: a refused hold was never in the queue, so the flush cannot find it;
+- a `shutdown_deny` the task has not recorded when the process exits;
 - a hold raised for a tool call that only a trailing, unterminated SSE frame
   completes: the gate drops the call and records nothing;
 - a hold that escaped the shutdown drain (A.1), when the process exits first.
 
 Where a decide request made the decision, the request was answered with success.
+
+### A.4 Vigil 2.3.0 and 2.3.1: producer denials recorded as `user_deny`
+
+Vigil 2.3.0 (`ac2be27`) and 2.3.1 (`4eb912b`) predate `shutdown_deny`. Three
+denials the producer made on its own authority are recorded as (`hold`,
+`user_deny`), the pair section 4.4.1 gives to a person's deny:
+
+- the shutdown drain, which sends a deny to every open hold
+  (`vigil-proxy/src/hold_queue.rs:216` in both releases);
+- a hold refused because shutdown had begun (`proxy.rs:1338` and `:1962`);
+- a closed decision channel (`proxy.rs:2539` and `:2577`).
+
+`decision_str` maps all three to `user_deny` (`proxy.rs:2637`). A `user_deny`
+record from those releases does not prove that a person decided. Vigil 2.3.2
+records the first two as `shutdown_deny`, and maps a closed channel to
+`shutdown_deny` too (`proxy.rs:2793` and `:2835` at `c449787`).
+
+A reader cannot reliably tell which release wrote a record. A Vigil 2.0 document
+carries no producer version: its members are `voaf_version`, `tag`,
+`generated_at`, `encryption_at_rest`, `genesis`, `head`, `anchor`, `predecessor`
+and `records`. The one version in the chain is `app_version` on a `lifecycle`
+`shutdown` record, which a release writes only when it shuts down gracefully. It
+does not attribute the records around it: a process that crashed writes none, and
+a denial recorded during the shutdown drain can follow it. So in a chain that
+Vigil 2.3.0 or 2.3.1 may have written, a `user_deny` record cannot be told apart
+from a person's deny.
 
 ## Appendix B. Vigil 2.3.2 producer notes
 
@@ -1194,10 +1240,11 @@ define, where it meets them.
   forwarded to the client (`proxy.rs:2226-2233`, then `:2298-2323`), and a forward
   that then fails is only logged (`:2324-2326`).
 - A hold record's hashes cover the response up to the moment the hold resolved.
-  The adapters release a message's calls together, so a hold resolved while
-  another call is undecided records a `response_hash_delivered` over output that
-  excludes its own call: on a buffered response, the SHA-256 of empty input. That
-  meets section 4.4.
+  The OpenAI and Google adapters and the Anthropic buffered adapter release a
+  message's calls together; the Anthropic stream adapter releases them from the
+  front. So a hold resolved while a call it waits on is undecided records a
+  `response_hash_delivered` over output that excludes its own call: on a buffered
+  response, the SHA-256 of empty input. That meets section 4.4.
 - Timeout deny text names the hold window. When another call in the same message
   was denied, a released call can be re-serialized rather than byte-identical. A
   streamed write to the client is not checked.

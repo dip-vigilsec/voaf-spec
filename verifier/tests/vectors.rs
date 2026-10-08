@@ -407,28 +407,34 @@ fn first_copy_parse(text: &str) -> Value {
     First.deserialize(&mut serde_json::Deserializer::from_str(text)).unwrap()
 }
 
-/// The v2.0.0 1.0 walk: linkage only, each entry's prev_hash equal to the hash
-/// before it, the first to the document's genesis.
+/// Vigil's 1.0 walk, as vigil-verify makes it: linkage only, each entry's
+/// prev_hash equal to the stored hash before it, the first entry not anchored.
+/// The README's 1.0 walk anchors entry 0 to the all-zero hash and would fail the
+/// relabelled document at a link instead, which is why that vector lists
+/// link_break as an acceptable code.
 fn link_only_walk_passes(doc: &Value) -> bool {
     let entries = doc["interactions"].as_array().unwrap();
-    let mut prev = doc["genesis"].as_str().unwrap().to_string();
+    let mut prev: Option<String> = None;
     for e in entries {
-        if e["prev_hash"].as_str() != Some(prev.as_str()) {
-            return false;
+        if let Some(p) = &prev {
+            if e["prev_hash"].as_str() != Some(p.as_str()) {
+                return false;
+            }
         }
-        prev = e["hash"].as_str().unwrap().to_string();
+        prev = Some(e["hash"].as_str().unwrap().to_string());
     }
     !entries.is_empty()
 }
 
-/// A genuine 1.x document is never refused: the 1.0 array of entries, and the
-/// object Vigil's 1.0 exporter wrote.
+/// A genuine 1.x document is never refused: the 1.0 array of entries, empty or
+/// not, and the object Vigil's 1.0 exporter wrote.
 #[test]
 fn a_genuine_1_0_document_is_not_refused() {
     let entry = serde_json::json!({"voaf": "1.0.0", "id": "e1", "timestamp": "2026-01-01T00:00:00Z",
         "provider": "openai", "model": "m", "direction": "request",
         "content_hash": "sha256:00", "prev_hash": "sha256:00", "annotations": {"seq": 1}});
     assert_eq!(voaf::document_format(&serde_json::json!([entry])).unwrap(), voaf::Format::V1);
+    assert_eq!(voaf::document_format(&serde_json::json!([])).unwrap(), voaf::Format::V1);
     let vigil = serde_json::json!({"voaf_version": "1.0", "interactions": [{"id": "a", "timestamp": "t",
         "prev_hash": "p", "hash": "h"}]});
     assert_eq!(voaf::document_format(&vigil).unwrap(), voaf::Format::V1);

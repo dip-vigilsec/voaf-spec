@@ -9,15 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Minor. No preimage byte and no hash changes, and the format tag stays `voaf-2.0`.
 
-**Compatibility, stated once:** 2.1.0 rejects documents that are malformed under
-I-JSON (RFC 7493) or that carry members or content no hash covers. It also
-enforces two rules the 2.0.0 text already stated, the section 4 nullability
-column and a declared field being present, which the 2.0.0 reference verifier
-partly left unchecked. Every document a 2.0 producer actually emitted still
-verifies, and every 2.0.0 vector and the chain reproduce unchanged. One passage
-of 2.0.0 described `client_disconnected` more broadly than any producer wrote it;
-it is corrected as an erratum, below. Section 7.1 states the rule that makes such
-a release minor.
+**Compatibility, stated once:** the only documents 2.1.0 newly rejects are
+malformed under I-JSON (a repeated member name, RFC 7493 section 2.3), have
+records that carry members or content no record hash covers, or break a rule
+2.0.0 already stated: the section 4 nullability column, a declared field being
+present (2.0.0's rule 1 failed a field that does not decode, and its reference
+verifier rejected a missing one but not a NULL), and the 1.0 schema. Members
+outside the records stay outside every hash. Every document a 2.0 producer
+actually emitted still verifies, and every 2.0.0 vector and the chain reproduce
+unchanged. Known producer deviation: Vigil 2.3.0 and 2.3.1 record producer
+denials as `user_deny`, so a `user_deny` from those releases does not prove a
+person decided (appendix A.4). One passage of 2.0.0 described
+`client_disconnected` more broadly than any producer wrote it; it is corrected as
+an erratum, below. Section 7.1 states the rule that makes such a release minor.
 
 ### Security
 
@@ -29,18 +33,20 @@ a release minor.
     covers only that one;
   - the vectors-file `$repeat` directive, which the verifier expanded in any
     record, so anything written beside it or inside it was dropped before
-    hashing;
-  - a `hash` member that is not a string, which can carry anything.
+    hashing.
 
   In each case the record read as verified while carrying text outside every
-  hash. The section 2 encoding is unambiguous over decoded values, so each of
+  hash. 2.0.0 also never said what type the stored hash has, so a `hash` member
+  could be an object carrying other text; a verifier that compared it as a string
+  rejected that, and 2.1.0 makes `hash` a present string. The section 2 encoding is unambiguous over decoded values, so each of
   these lives in the step from JSON to values, and 2.1.0 closes them there
   (`spec/2.0/preimage.md` sections 4.2.1 and 7).
 - **Members outside the records stay outside every hash.** The declared format,
   the genesis, the anchor and any exporter metadata are covered by no record
-  hash, in 2.0.0 and in 2.1.0 (section 9). The one that decides how a document is
-  walked, its declared version, is no longer taken on trust: a document that
-  declares 1.x and carries 2.x-only structure is rejected, never walked link-only
+  hash, in 2.0.0 and in 2.1.0 (section 9). The declared version decides how a
+  document is walked. A 1.0 verdict never asserts content integrity, and a
+  verifier cannot always detect a relabelled 2.x document; what it can detect, a
+  document that declares 1.x and carries 2.x-only structure, it rejects
   (section 7). Under 2.0.0 such a document, a 2.0 chain relabelled 1.0 with a
   record altered, passed a link-only walk; Vigil's own 2.0 verifier reported it
   verified.
@@ -75,9 +81,12 @@ a release minor.
   `restore`), not a tool-call decision, spelled out, and what the response hash
   fields cover. "An allow" is defined: the four pairs that say the call was
   delivered.
-- Section 7: the parse check, the relabel check and its MUST, a 1.0 verdict that
-  never matches a 2.x verdict, rule 1 as a list of its checks with a code for
-  each, and a MUST to escape every document string a verifier shows a person.
+- Section 7: the parse check; the 2.x-structure check on a 1.x declaration, with
+  the 1.0 verdict as the protection when a relabelled document cannot be
+  detected; a 1.0 verdict that never asserts content integrity and never matches
+  a 2.x verdict; rule 1 as a list of its checks; a code for every check, rule 4's
+  `link_break` included; and a MUST to escape every document string a verifier
+  shows a person.
 - Section 7 rule 2: a verifier MUST NOT count or present a record whose
   (`verdict`, `decision`) pair it does not recognise as an allow, whether a value
   is unknown or the pair is not one section 4.4.1 lists, and SHOULD report such
@@ -87,9 +96,10 @@ a release minor.
   also says when a stricter release is minor.
 - Appendix A, known producer deviations, and appendix B, producer notes, both
   non-normative: where Vigil 2.3.2 does not meet the section 4 definitions,
-  including the shutdown drain race, allow pairs for calls never released, and
-  the complete list of holds and calls that leave no record, and how it writes
-  the records that do.
+  including the shutdown drain race, allow pairs for calls never released, every
+  loss path found for holds and calls that leave no record, and Vigil 2.3.0 and
+  2.3.1 recording producer denials as `user_deny`; and how Vigil 2.3.2 writes the
+  records that meet the definitions.
 - Six positive vectors, one for each `decision` value no earlier vector carried:
   `shutdown_deny`, `connection_panicked`, `timeout_deny`, `user_approve`,
   `always_allow` and `restore`.
@@ -172,7 +182,7 @@ a release minor.
   - Its header says what it is: independent of the writer, begun as a copy of
     vigil-verify's preimage module, and ahead of vigil-verify, which gains the
     2.1.0 checks in a later pull request.
-- `neg_field_count_mutated` changes the count from 35 to 32, not from 33. Two
+- `neg_field_count_mutated` changes the count from 35 to 32, not from 33. Three
   vector notes are corrected: `connection_panicked` says panicked, and the
   `client_disconnected` and `restore` notes match sections 4.4 and 4.4.1.
 
