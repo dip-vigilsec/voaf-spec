@@ -27,14 +27,24 @@ content length and the re-rooted chain, and states the limits.
 
 Revision 1 and 2 vectors are withdrawn, not amended.
 
-Revision 4 is spec release 2.1.0. It changes no preimage byte and no field, so
-the format tag stays `voaf-2.0`. It adds two `gate_decision.decision` tokens
-(section 4.7.1) and scopes the section 4.4 NULL-delivery rule to the held call,
-states how a verifier treats a decision it does not recognise and how that
-vocabulary is versioned (section 7), makes the reference verifier reject a NULL
-`decision` and escape the kind in its unknown-kind error, adds six positive and
-two negative vectors, and extends the section 8.1 field table to match. Every
-revision 3 vector, and the chain, is unchanged.
+Revision 4 is spec release 2.1.0. It changes no preimage byte, no field and no
+hash, so the format tag stays `voaf-2.0`.
+
+A 2.0.0 verifier accepts documents that carry text no hash covers: a member no
+table declares, a second member with the same name, or the vectors-file `$repeat`
+directive with anything written beside it. Revision 4 forbids each, by
+validation alone: the document is parsed with no repeated member name, and
+section 7 rule 1 lists every check a record must pass, the member set and every
+nullability among them (sections 4.2.1 and 7).
+
+It also adds two `gate_decision.decision` tokens (section 4.7.1), defines every
+(`verdict`, `decision`) pair and what an allow is (section 4.4.1), scopes the
+section 4.4 NULL-delivery rule to the held call and says what a present delivery
+hash shows, states the Vigil 2.3.2 shutdown drain race, says how a verifier
+treats a decision it does not recognise and how that vocabulary is versioned
+(section 7), and fixes the citations. The reference verifier enforces all of
+section 7 rule 1, and the vectors file gains six positive and eight negative
+vectors. Every revision 3 vector, and the chain, is unchanged.
 
 ## 1. Why this replaces the v1 construction
 
