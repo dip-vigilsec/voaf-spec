@@ -1,13 +1,18 @@
-//! The VOAF 2.0 preimage, implemented from `docs/specs/voaf-2.0-preimage.md`.
+//! The VOAF 2.0 preimage, implemented from `spec/2.0/preimage.md`.
 //!
 //! Deliberately NOT shared with the writer.
 //!
-//! This crate exists so a third party can verify a document without Vigil
+//! This file exists so a third party can verify a document without Vigil
 //! installed, and so that agreement between the writer and the verifier is
 //! evidence. If both called one function, agreement would prove only that the
-//! function is self-consistent. The checked-in test vectors are the contract
-//! between the two implementations, and `tests/vectors.rs` holds this one to
-//! them.
+//! function is self-consistent. The test vectors in `spec/2.0/test-vectors.json`
+//! are the contract between the two implementations, and
+//! `verifier/tests/vectors.rs` holds this one to them.
+//!
+//! It is independent of the writer, Vigil's `chain::preimage`, and of nothing
+//! else: it began as the preimage module of Vigil's vigil-verify
+//! (`vigil-verify/src/voaf.rs`), and the two are kept in step, so agreement
+//! between them is one implementation agreeing with itself.
 //!
 //! Consequence, stated so nobody is surprised: a change to the preimage must be
 //! made here as well, and the vector tests are what catch a miss.

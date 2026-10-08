@@ -3,7 +3,7 @@
   "revision": 4,
   "supersedes": "revisions 1 and 2. Revision 1 had three proven collision classes. Revision 2 typed the NULL marker; the owner ruled NULL stays one byte and criterion 4 is reworded instead.",
   "revision_4": "Spec release 2.1.0. Adds six positive gate_decision vectors, one for every decision token no earlier vector carried (shutdown_deny, connection_panicked, timeout_deny, user_approve, always_allow, restore), and eight negative vectors: a null decision, a decision edited without re-hashing, and one for each check section 7 rule 1 gains in 2.1.0: the $repeat directive in a document, a member outside the record's fields, a repeated member name, a null non-nullable field, a null array element and a null features_canonical. The v2.0.0 reference verifier accepts each of the last six with its stored_hash. Every revision 3 vector and the chain are unchanged.",
-  "generated_for": "docs/specs/voaf-2.0-preimage.md",
+  "generated_for": "spec/2.0/preimage.md",
   "hash": "sha256",
   "repeat_directive": {
     "form": {
@@ -938,7 +938,7 @@
     {
       "name": "gate_decision_shutdown_deny",
       "event_kind": "gate_decision",
-      "note": "Revision 4. The producer was shutting down with this hold open, or refused the hold because shutdown had begun, so it denied the hold itself. It wrote deny text in place of the call, the same substitution as user_deny, so both response hashes are present and differ. Not a person's deny, and not an allow. Section 4.7.1.",
+      "note": "Revision 4. The producer was shutting down with this hold open, or refused the hold because shutdown had begun, so it denied the hold itself. It wrote deny text in place of the call, the same substitution as user_deny, so both response hashes are present and differ. Not a person's deny, and not an allow. Section 4.7.1. interaction_id is carried over from gate_decision_deny, the vector this one forks; Vigil 2.3.2 writes it NULL on every gate_decision record. The field is nullable, so either encodes.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1016,7 +1016,7 @@
     {
       "name": "gate_decision_timeout_deny",
       "event_kind": "gate_decision",
-      "note": "Revision 4. No decision arrived within the hold window. The timeout deny text differs from the user_deny text, so the delivered hash differs from both the upstream hash and the one in gate_decision_deny.",
+      "note": "Revision 4. No decision arrived within the hold window. The timeout deny text differs from the user_deny text, so the delivered hash differs from both the upstream hash and the one in gate_decision_deny. interaction_id is carried over from gate_decision_deny, the vector this one forks; Vigil 2.3.2 writes it NULL on every gate_decision record. The field is nullable, so either encodes.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1055,7 +1055,7 @@
     {
       "name": "gate_decision_user_approve",
       "event_kind": "gate_decision",
-      "note": "Revision 4. A person approved the held call, and it was replayed. In this vector the response carries one call and nothing was substituted, so the two hashes are equal. They are taken when the hold resolves, over the response so far, so an approved call's record can carry different hashes when an earlier call in the same response was substituted, another is still held, or upstream bytes after the call have not yet been released.",
+      "note": "Revision 4. A person approved the held call, and it was replayed. In this vector the response carries one call and nothing was substituted, so the two hashes are equal. They are taken when the hold resolves, over the response so far, so an approved call's record can carry different hashes when an earlier call in the same response was substituted, another is still held, or upstream bytes after the call have not yet been released. interaction_id is carried over from gate_decision_deny, the vector this one forks; Vigil 2.3.2 writes it NULL on every gate_decision record. The field is nullable, so either encodes.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1094,7 +1094,7 @@
     {
       "name": "gate_decision_always_allow",
       "event_kind": "gate_decision",
-      "note": "Revision 4. A person approved the held call and allowed calls like it from then on. As in gate_decision_user_approve, the two hashes are equal in this vector only because nothing else in the response was substituted or held when the hold resolved.",
+      "note": "Revision 4. A person approved the held call and allowed calls like it from then on. As in gate_decision_user_approve, the two hashes are equal in this vector only because nothing else in the response was substituted or held when the hold resolved. interaction_id is carried over from gate_decision_deny, the vector this one forks; Vigil 2.3.2 writes it NULL on every gate_decision record. The field is nullable, so either encodes.",
       "chain_member": false,
       "record": {
         "seq": 9,
@@ -1178,7 +1178,7 @@
     {
       "name": "neg_field_count_mutated",
       "basis": "interaction_minimal",
-      "mutation": "field count changed from 33 to 32",
+      "mutation": "field count changed from 35 to 32",
       "expected_hash": "50c1812bba97f5cad20ea48144658e2d194e83a436dd120b0c8473b6cd2ccbfa",
       "requirement": "criterion 4: altering the field count changes the hash",
       "must_differ_from": "bcad55ec0da2a4dc1060465991c8668d224982e9d0bf35dbbf85041283d918cc"

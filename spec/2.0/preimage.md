@@ -1,13 +1,19 @@
 # VOAF 2.0 preimage
 
 Revision 4, spec release 2.1.0. Status: proposed, frozen on acceptance. Owner: C-store.
-Companion vectors: `docs/specs/voaf-2.0-test-vectors.json` (revision 4).
-Companion document format: `voaf-2.0-document.md`, owned by C-verify.
-Supersedes the Hash Computation section of `docs/VOAF_SPEC.md`.
+Companion vectors: `spec/2.0/test-vectors.json` (revision 4), in this repository.
+Vigil carries a copy at `docs/specs/voaf-2.0-test-vectors.json`.
+Companion reference verifier: `spec/2.0/reference-verifier.rs`, which
+`verifier/tests/vectors.rs` runs against every vector.
+Companion document format: `voaf-2.0-document.md`, owned by C-verify. It is not
+published; section 7 states what a verifier requires of a document.
+Supersedes, for 2.x, the 1.0 hash computation: the Hash Chain Verification
+section of this repository's README, and the Hash Computation section of Vigil's
+`docs/VOAF_SPEC.md`.
 
 This document defines the exact bytes hashed for every chained record, and
-nothing else. The JSON envelope that carries those records is specified in the
-companion document. Nothing in Track C may define or vary the preimage.
+nothing else. The JSON envelope that carries those records belongs to the
+document format. Nothing in Track C may define or vary the preimage.
 
 ### Revision history
 
@@ -44,7 +50,8 @@ record said, and no version of this chain proves when anything happened
 (section 9). Anyone with write access to `vigil.db` can rewrite every captured
 prompt and response and `verify_chain` still reports all entries clean.
 
-The version is 2.0, not 1.1, because `docs/VOAF_SPEC.md` Versioning Policy
+The version is 2.0, not 1.1, because the Versioning Policy in Vigil's
+`docs/VOAF_SPEC.md`
 classifies a change to the chain verification algorithm as major.
 
 ## 2. Encoding primitives
@@ -167,8 +174,9 @@ hash mismatch instead of a self-consistent wrong record.
 carries.** It takes the declared count, encodes it, and lets any disagreement
 surface as a hash mismatch. An earlier wording implied an arity cross-check; an
 implementer built one and it hard-failed `neg_field_count_mutated`, which
-declares 32 while encoding 33. That vector exists to show the hash moves when the
-count is mutated, not to be accepted as a valid document.
+declares 32 for an `interaction` record, whose count is 35. That vector exists to
+show the hash moves when the count is mutated, not to be accepted as a valid
+document.
 
 **Any change to any event kind's field list, field order, or field types
 requires a new tag.** Adding a field to an existing kind is not a minor
@@ -438,7 +446,7 @@ existed and was deliberately not retained. Vectors `interaction_minimal` and
 
 ### 4.4 `gate_decision`, fields 8 to 23
 
-Inlined rather than referenced, because `docs/specs/execution-gate-v1.md` is not
+Inlined rather than referenced, because Vigil's `docs/specs/execution-gate-v1.md` is not
 on this branch. That file's section 10 is informative; this table is normative.
 
 | # | Field | Type | Nullable |
@@ -670,11 +678,13 @@ and neither is an allow (section 4.4.1).
 **`connection_panicked`**
 
 - Written by: the producer's connection supervisor, not the gate's decision path.
-- When: the task serving the client connection failed while the hold was still
+- When: the task serving the client connection panicked while the hold was still
   open and undecided. The supervisor removes each hold still in the producer's
   queue when it runs, so no later decision can act on it, and records it. In
-  Vigil 2.3.2 a hold decided in the moment between the failure and that flush
-  leaves no record of either kind.
+  Vigil 2.3.2 a task that returns an error or is cancelled triggers no such flush,
+  and two holds leave no record of either kind: one decided after the panic and
+  before that flush, and one decided before the panic but not yet recorded. In
+  both cases the decide request that made the decision is answered with success.
 - Whether the held action executed: no. The task that held the call and the
   client connection is gone. The call is never written to the client, and the
   client sees its connection close. `response_hash_upstream` and
@@ -687,7 +697,9 @@ what a client did with a call it obtained some other way.
 
 In Vigil 2.3.2 the two values come from `decision_str` and `record_orphaned_hold`
 in `vigil-proxy/src/proxy.rs`. Vigil 2.3.2 writes `interaction_id` NULL on every
-`gate_decision` record, whatever the decision.
+`gate_decision` record, whatever the decision. Throughout this document, Vigil
+2.3.2 means the source at Vigil commit `c449787`: no 2.3.2 release is tagged at
+the time of writing, so these statements describe that commit, not a release.
 
 ### 4.7b `lifecycle`, fields 8 to 10
 
@@ -745,8 +757,9 @@ hash-valued fields are never hex-decoded governs the enumerated preimage
 *fields*; `install_nonce` is not one of them and never appears in a preimage.
 Both operands are fixed length so the concatenation is unambiguous.
 
-The genesis is carried in no record. A verifier obtains it from the document
-metadata block, which the companion document spec defines.
+The genesis is carried in no record. A verifier obtains it from the document's
+metadata, which belongs to the unpublished document format; Vigil's exporter
+writes it as the document's top-level `genesis` member.
 
 The property this buys, stated narrowly: **a party who has never observed any
 record or export from this install cannot guess its genesis.** Revision 1 said
@@ -777,7 +790,7 @@ record 0 commits to the v1 chain as an archived artifact.
 
 v1 rows remain in `interactions` with `chain_version = 1`, are excluded from 2.0
 verification, and are shown in the dashboard with the archive reference.
-**Nothing is deleted.** This is the pattern for every future major version.
+**Nothing is deleted.** This is the pattern for every future format tag.
 
 ## 6. Head anchor
 
@@ -862,8 +875,9 @@ For each record in `seq` order:
    - a member other than `seq`, `prev_hash`, `id`, `timestamp_us`, `event_kind`,
      `hash` and the fields section 4 declares for the record's kind. Section 2.2
      makes any other field a new tag, so no `voaf-2.0` record carries one, and a
-     member no preimage reads is text no hash covers. The VOAF 1.x rule that a
-     verifier ignores a field it does not know does not carry over to 2.x;
+     member no preimage reads is text no hash covers. Vigil's VOAF 1.x
+     specification (`docs/VOAF_SPEC.md`) lets a 1.x verifier ignore a field it
+     does not know; that does not carry over to 2.x;
    - a value of the wrong type: a JSON object or array where the table declares a
      string, an integer or a bool, a non-array where it declares an array, or an
      element that is not of the declared element type. Nothing in a document is
@@ -882,10 +896,13 @@ For each record in `seq` order:
    `features_canonical` does not hold exactly 27 elements, and any record whose
    preimage exceeds the section 2.1 per-preimage bound.
 
-   A token outside a section 4.7 vocabulary is **not** a failure. Those
-   vocabularies grow when an enum gains a variant, which changes no field list and
-   no field type and so needs no tag bump. A verifier that rejected unknown tokens
-   would reject valid future records.
+   A token outside a section 4.7 vocabulary, other than an `event_kind`, is
+   **not** a failure. Those vocabularies grow when an enum gains a variant, which
+   changes no field list and no field type and so needs no tag bump. A verifier
+   that rejected unknown tokens would reject valid future records. An
+   `event_kind` is the exception because it selects the field table: a kind with
+   no schema cannot be decoded, which is the hard failure above, and a new kind is
+   a new tag (section 2.2).
 
    If a verifier does not recognise a `gate_decision` record's `decision`, it
    MUST NOT count or present that record as an allow (section 4.4.1), and
@@ -941,10 +958,10 @@ should report it. A 2.0.0 verifier is bound only by rule 2 itself.
 1. `chain::preimage(&Record) -> Vec<u8>` is the single implementation. The three
    hand-rolled copies at `vigil-store/src/lib.rs:468-475`, `:1040-1045` and
    `:1382-1386` are replaced by calls to it.
-2. Every vector in `voaf-2.0-test-vectors.json` reproduces byte for byte in Rust,
+2. Every vector in `spec/2.0/test-vectors.json` reproduces byte for byte in Rust,
    against both `preimage_hex` where present and `preimage_sha256` always.
 3. A Python reference verifier under 150 lines, written by C-verify from this
-   document and the companion document spec alone, reproduces every vector hash
+   document alone, reproduces every vector hash
    without reading the Rust. The budget is 150 rather than 100 because a
    from-prose implementation measured 98 lines only under deliberately dense
    formatting and about 135 naturally. The point of the budget is that the
@@ -972,7 +989,7 @@ should report it. A 2.0.0 verifier is bound only by rule 2 itself.
 ### 8.1 The companion vectors file
 
 Acceptance criterion 3 says the reference verifier is written from this document
-alone, so the fields of `voaf-2.0-test-vectors.json` are specified here rather
+alone, so the fields of `spec/2.0/test-vectors.json` are specified here rather
 than left to be inferred.
 
 | Field | Meaning |
@@ -984,14 +1001,23 @@ than left to be inferred.
 | `vectors[].preimage_len` | Byte length of the assembled preimage |
 | `vectors[].preimage_hex` | The preimage bytes, lowercase hex. **Null** when the preimage exceeds 4096 bytes; check `preimage_sha256` instead |
 | `vectors[].chain_member` | Whether this vector is part of the linked chain |
+| `vectors[].note` | Informative prose about the vector. Not normative |
+| `vectors[].must_differ`, `vectors[].substituted_field`, `vectors[].expected_hash_if_rule_ids_were_empty_string` | Acceptance criterion 5: the hash the record would have with `substituted_field` encoded as an empty string instead of an empty array, which must differ from `expected_hash` |
 | `chain.genesis_case_index` | Index into `genesis.cases` of the nonce anchoring the chain |
 | `chain.head_hash`, `chain.entry_count` | The walk's expected head and length |
 | `negative_vectors[]` | Inputs that must not verify, or mutations whose hash must move |
+| `negative_vectors[].basis` | The positive vector the case is derived from |
+| `negative_vectors[].mutation` | In prose, what was changed from `basis`. On a vector with neither `record` nor `record_json`, it is the whole input: apply it to the basis |
+| `negative_vectors[].expected_hash`, `negative_vectors[].must_differ_from` | On a mutation case, the hash of the mutated preimage, and the basis hash it must differ from |
+| `negative_vectors[].expected_outcome`, `negative_vectors[].requirement` | In prose, how the case fails and the rule it exercises |
 | `negative_vectors[].record` | Present from revision 4: a whole record, exactly as a document carries it and never expanded, that must fail section 7 at that record |
 | `negative_vectors[].record_json` | Present from revision 4: a record as JSON text, for a case a parsed object cannot hold. `neg_duplicate_member` fails the section 7 parse check before any record is decoded |
 | `negative_vectors[].violation` | Present from revision 4 on every vector that carries `record` or `record_json`: the check it fails. `duplicate_member` is the section 7 parse check; `unknown_member`, `wrong_type`, `null_field` and `null_element` are rule 1; `hash_mismatch` is rule 3 |
 | `negative_vectors[].stored_hash` | The hash a document carries for the record. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In every other vector, it is what an encoder without the failing check computes, the v2.0.0 reference verifier among them, so only that check rejects the record |
 | `revision_4` | What revision 4 added to this file |
+
+`neg_tag_mutated` writes the tag `voaf-2.1` only to show that the hash moves
+with the tag. Spec release 2.1.0 keeps the tag `voaf-2.0` (section 2.2).
 
 **Chain membership is `chain_member`, not prose.** Walk exactly the vectors
 where it is true, in `seq` order. An earlier revision expressed membership only
