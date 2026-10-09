@@ -1,6 +1,7 @@
 # Runs every vector in spec/2.0/test-vectors.json against the reference
-# verifier. No paths filter: a required check that never reports would hold a
-# pull request open forever.
+# verifier, and against conformance-py, an independent Python verifier written
+# from the spec text alone. No paths filter: a required check that never
+# reports would hold a pull request open forever.
 name: vectors
 
 on:
@@ -32,3 +33,28 @@ jobs:
       - name: Every test ran
         run: |
           grep -E '^test result: ok\. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"
+
+  conformance-py:
+    name: conformance-py, Python 3.9.6, every vector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Python 3.9.6, the interpreter it was written and tested on, pinned by
+    # running in the official image of that exact release.
+    container:
+      image: python:3.9.6-slim-buster
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Python is 3.9.6
+        run: python -c 'import sys; print(sys.version); assert sys.version_info[:3] == (3, 9, 6)'
+      # The three files are the isolated session's, copied unchanged.
+      - name: Files unchanged
+        working-directory: conformance-py
+        run: sha256sum -c SHA256SUMS
+      # run_vectors.py reads spec/2.0/test-vectors.json relative to its own
+      # directory, not the working directory, so link the repository's spec/.
+      - name: Point it at the repository's vectors
+        run: ln -s ../spec conformance-py/spec
+      - name: Run every vector
+        run: python conformance-py/run_vectors.py
