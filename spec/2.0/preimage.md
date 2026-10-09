@@ -1174,10 +1174,10 @@ itself.
    98 lines only under deliberately dense formatting and about 135 naturally. The
    point of the budget is that the hasher stays auditable by eye, not that it hits
    a round number. A full verifier, which also makes the section 7 checks, is
-   longer and is not held to the budget. Not met for spec release 2.1.0: no hasher
-   written from the prose is published. The reference verifier,
-   `spec/2.0/reference-verifier.rs`, is not written from the prose and does not
-   meet this criterion.
+   longer and is not held to the budget. `conformance-py/` holds a verifier
+   written from the prose alone, and CI runs it against every vector. The
+   reference verifier, `spec/2.0/reference-verifier.rs`, is not written from the
+   prose and does not meet this criterion.
 4. **Altering any field value, the format tag, or the field count changes the
    hash.** Field types are fixed per tag by the section 4 tables; a type change
    is a tag bump, not something the encoding detects.
