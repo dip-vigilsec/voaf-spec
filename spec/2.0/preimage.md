@@ -8,7 +8,8 @@ Companion reference verifier: `spec/2.0/reference-verifier.rs`, which
 `verifier/tests/vectors.rs` runs against every vector. It began as the preimage
 module of Vigil's vigil-verify and is now ahead of it: vigil-verify gains these
 2.1.0 checks in a later pull request. It is not written from this document;
-acceptance criterion 3 asks for a hasher that is, and none is published
+acceptance criterion 3 asks for a hasher that is, and `conformance-py/` holds a
+verifier written from the prose alone, which CI runs against every vector
 (section 8).
 Companion document format: `voaf-2.0-document.md`, owned by C-verify. It is not
 published. Section 7 defines the four top-level members a verifier reads in a

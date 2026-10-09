@@ -188,8 +188,9 @@ such a release minor.
   records are covered by no hash, and that the carried anchor and genesis are
   self-asserted.
 - Section 8: criterion 1 is marked historical, criterion 3 measures a hasher,
-  not a full verifier, and is marked not met for 2.1.0, and criterion 6 says
-  which cases v2.0.0 accepted.
+  not a full verifier, and points at `conformance-py/`, a verifier written from
+  the prose alone that CI runs against every vector, and criterion 6 says which
+  cases v2.0.0 accepted.
 - Section 6's table compares the device's store with its keychain, and does not
   apply to a document. Section 4.7b says the anchor written after a graceful
   `shutdown` record covers it, and that a `shutdown_deny` can follow it in the
