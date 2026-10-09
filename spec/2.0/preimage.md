@@ -66,7 +66,6 @@ a 1.0 document, and the vectors file gains six positive and eighteen negative
 vectors and thirteen negative documents. No revision 3 record, hash or chain
 value changed; one mutation description and three vector notes were corrected.
 
-
 ## 1. Why this replaces the v1 construction
 
 The v1 preimage, at `vigil-store/src/lib.rs:468-475`:
@@ -909,7 +908,6 @@ as the `{"unreadable": true}` Vigil's exporter writes when it cannot read the
 device's anchor: it tells an auditor the device had an anchor it could not read,
 and a verifier MUST NOT report it the same as a document that never carried one.
 
-
 The checks below constrain the records, the chain they form, and the anchor
 carried with them. Every member outside the records, the declared format, the
 genesis and the anchor among them, is covered by no record hash (section 9).
@@ -1109,43 +1107,51 @@ outside every hash, so it is not a ground for rejection. A repeated member name
 is, at the top level as at any depth: of two `records` members a parser keeps
 one, and the other carries a copy of the chain that no check reads.
 
-Spec release 2.1.0 is such a release, except for two kinds of document, below.
-It fails a
-repeated member name. It fails a member outside the record's fields, the
-vectors-file directive in a document and a `hash` that is not a string, each text
-no record hash covers. It fails these, each a rule already stated: a NULL the
-section 4 tables forbade; a missing field, which 2.0.0's rule 1 already failed (a
-field that is absent does not decode); a document that declares 1.x and carries
-structure only 2.x defines (a `records` member, or an entry carrying
-`event_kind`, `seq` or `timestamp_us`), and a 1.0 array of entries in which an
-entry does not declare 1.x, neither of which the 1.0 schema allows; a repeated
-`seq`, which 2.0.0 already forbade (section 4.0 made `seq` unique and gapless, and
-section 7 made it increase by exactly 1) without naming a verdict; and a
-carried anchor whose `head_hash` is not the stored hash of the record it counts
-to, which is what 2.0.0's section 6 defined `head_hash` to be.
+Spec release 2.1.0, and no other release, has a fourth ground. It is the first
+release to define the members of a 2.x document a verifier reads, which 2.0.0
+left to the unpublished document format (`voaf-2.0-document.md`), so it may also
+fail a document that lacks a member, or a declared version, as every 2.0
+producer wrote it. This ground covers only this first definition of the document
+members. It gives a later minor release no general licence: a later release that
+newly requires a member, or recognises fewer declared versions, is not minor by
+it.
 
-The two kinds are documents 2.0.0 did not fail: it named neither `records` nor
-`voaf_version`, and left the document members to the unpublished document
-format. They are a 2.x document without a `records` array, and a document
-without a declared version section 7 recognises. 2.1.0 rejects both, and no 2.0
-producer emitted either: Vigil 2.3.2 writes `voaf_version` `2.0` and a `records`
-array in every 2.0 export. A document with a record count of 1 or more and no
-genesis string is rejected too, but 2.0.0, which rooted record 0 at the genesis,
-could not verify it either. With a record count of 0 the genesis is not read, so
-Vigil 2.3.2's export of a store with no records and no genesis, which carries
+Spec release 2.1.0 is minor on these four grounds. It fails a repeated member
+name. It fails a member outside the record's fields, the vectors-file directive
+in a document and a `hash` that is not a string, each text no record hash
+covers. It fails these, each a rule already stated: a NULL the section 4 tables
+forbade; a missing field, which 2.0.0's rule 1 already failed (a field that is
+absent does not decode); a document that declares 1.x and carries structure only
+2.x defines (a `records` member, or an entry carrying `event_kind`, `seq` or
+`timestamp_us`), and a 1.0 array of entries in which an entry does not declare
+1.x, neither of which the 1.0 schema allows; a repeated `seq`, which 2.0.0
+already forbade (section 4.0 made `seq` unique and gapless, and section 7 made
+it increase by exactly 1) without naming a verdict; and a carried anchor whose
+`head_hash` is not the stored hash of the record it counts to, which is what
+2.0.0's section 6 defined `head_hash` to be. Under the fourth ground it fails a
+2.x document without a `records` array, and a document without a declared
+version section 7 recognises. 2.0.0 named neither `records` nor `voaf_version`,
+and failed neither document. Every 2.0 producer wrote both: Vigil 2.3.0 to 2.3.2
+write `voaf_version` `2.0` and a `records` array in every 2.0 export.
+
+A document with a record count of 1 or more and no genesis string is rejected
+too, but 2.0.0, which rooted record 0 at the genesis, could not verify it
+either. With a record count of 0 the genesis is not read, so Vigil 2.3.2's
+export of a store with no records and no genesis, which carries
 `"genesis": null`, reports `empty`, or `truncated` when its anchor counts
-records, as it did under 2.0.0 (`doc_empty_store_genesis_null`). Every document
-a 2.0 producer emitted from an intact store still verifies under 2.1.0, or, with
-zero records, still reports `empty`: a real export from Vigil 2.3.2 does.
+records, as it did under 2.0.0 (`doc_empty_store_genesis_null`). Every document a 2.0 producer
+emitted from an intact store still verifies under 2.1.0, or, with zero records,
+still reports `empty`: a real export from Vigil 2.3.2 does.
 
 **Erratum.** 2.0.0 said, in section 4.4, that the `client_disconnected` outcome
 is exactly the case of "a hold whose client left mid-hold", which "delivered no
 bytes". Both were broader than any producer wrote it: a producer records
 `client_disconnected` only when it finds the client gone, and on a streamed
 response the events before the held call may already have been delivered.
-Revision 4 corrects the text; the value's meaning, that nothing was delivered for
-the held call, is unchanged, and no producer wrote a record the corrected text
-does not describe. The rule above governs every release after 2.1.0.
+Revision 4 corrects the text; the value's meaning, that nothing was delivered
+for the held call, is unchanged, and no producer wrote a record the corrected
+text does not describe. So the correction changes no row's meaning, and is minor
+under the first paragraph of this section.
 
 Rule 2 is what makes an added value or pair safe for a verifier that predates
 it: that verifier still verifies the record. A verifier written to revision 4 or

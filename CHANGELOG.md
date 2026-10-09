@@ -11,26 +11,27 @@ Minor. No preimage byte and no hash changes, and the format tag stays `voaf-2.0`
 
 **Compatibility, stated once:** the documents 2.1.0 newly fails are malformed
 under I-JSON (a repeated member name, RFC 7493 section 2.3), have records that
-carry members or content no record hash covers, or break a rule 2.0.0 already
-stated: the section 4 nullability column, a declared field being present
-(2.0.0's rule 1 failed a field that does not decode, and its reference verifier
-rejected a missing one but not a NULL in a body field), the 1.0 schema, `seq`
-being unique and gapless, and the anchor's definition. Two kinds of document
-fall outside those grounds: a 2.x document without a `records` array, and one
-without a declared version 2.1.0 recognises. 2.0.0 did not fail either, since it
-named neither member and left the document members to an unpublished format, and
-no 2.0 producer emitted either. A document with records and no genesis string is
-rejected, and 2.0.0 could not verify it either; with zero records the genesis is
-not read. Members outside the records stay outside every hash, and a top-level
-member a verifier does not read is ignored. Every document a 2.0 producer
-emitted from an intact store still verifies, or, with zero records, still
-reports `empty`, and every 2.0.0 vector and the chain reproduce unchanged. Known
-producer deviation: Vigil 2.3.0 and 2.3.1 record producer denials as
-`user_deny`, so a `user_deny` from those releases does not prove a person
-decided (appendix A.4). One passage of 2.0.0 described `client_disconnected`
-more broadly than any producer wrote it; it is corrected as an erratum, below.
-Section 7.1 states the rule that makes such a release minor.
-
+carry members or content no record hash covers, break a rule 2.0.0 already
+stated, or lack a member or a declared version as every 2.0 producer wrote it.
+The rules already stated are the section 4 nullability column, a declared field
+being present (2.0.0's rule 1 failed a field that does not decode, and its
+reference verifier rejected a missing one but not a NULL in a body field), the
+1.0 schema, `seq` being unique and gapless, and the anchor's definition. The
+last ground is 2.1.0's alone: it is the first release to define the document
+members 2.0.0 left to an unpublished format, and section 7.1 gives later minor
+releases no such licence. Under it 2.1.0 rejects a 2.x document without a
+`records` array and one without a declared version it recognises; 2.0.0 did not
+fail either. A document with records and no genesis string is rejected, and
+2.0.0 could not verify it either; with zero records the genesis is not read.
+Members outside the records stay outside every hash, and a top-level member a
+verifier does not read is ignored. Every document a 2.0 producer emitted from an
+intact store still verifies, or, with zero records, still reports `empty`, and
+every 2.0.0 vector and the chain reproduce unchanged. Known producer deviation:
+Vigil 2.3.0 and 2.3.1 record producer denials as `user_deny`, so a `user_deny`
+from those releases does not prove a person decided (appendix A.4). One passage
+of 2.0.0 described `client_disconnected` more broadly than any producer wrote
+it; it is corrected as an erratum, below. Section 7.1 states the rule that makes
+such a release minor.
 
 ### Security
 
@@ -122,7 +123,10 @@ Section 7.1 states the rule that makes such a release minor.
   records with the raw values.
 - Section 7.1: adding a row to section 4.4.1, a new value or a new pair, is a
   minor change; removing a row or changing its meaning is a major change. It
-  also says when a stricter release is minor.
+  also says when a stricter release is minor, and gives 2.1.0, the first release
+  to define the document members a verifier reads, a fourth ground that no later
+  release inherits.
+
 - Appendix A, known producer deviations, and appendix B, producer notes, both
   non-normative: where Vigil 2.3.2 does not meet the section 4 definitions,
   including the shutdown drain race, allow pairs for calls never released, every
@@ -161,7 +165,6 @@ Section 7.1 states the rule that makes such a release minor.
   check computes the stored hash, and it walks every negative that carries
   `record` in place inside the chain. CI runs it on every pull request and every
   push to `main`, with a time limit, and checks that every test ran.
-
 
 ### Changed
 
@@ -245,22 +248,23 @@ Section 7.1 states the rule that makes such a release minor.
 - A 2.0.0 verifier still verifies records carrying either new value, because
   section 7 rule 2 makes an unknown token not a failure. 2.0.0 did not say what a
   verifier may do with such a record. The section 7 addition does.
-- What 2.1.0 fails that 2.0.0 accepted: a repeated member name (RFC 7493
-  section 2.3; RFC 8259 says only that names SHOULD be unique, so this check is
-  new in 2.1.0), a member outside the record's fields, the `$repeat` directive in
-  a document, a `hash` that is not a string, a 1.x declaration on a document with
+- What 2.1.0 fails that 2.0.0 accepted: a repeated member name (RFC 7493 section
+  2.3; RFC 8259 says only that names SHOULD be unique, so this check is new in
+  2.1.0), a member outside the record's fields, the `$repeat` directive in a
+  document, a `hash` that is not a string, a 1.x declaration on a document with
   2.x-only structure, a 1.0 array of entries in which an entry does not declare
   1.x, a NULL the section 4 tables forbid, a carried anchor whose `head_hash` is
   not the stored hash of the record it counts to, a 2.x document without a
   `records` array, and a document without a declared version section 7
-  recognises. Section 2.2 already
-  made any field outside a kind's list a new tag, section 4.2.1 already confined
-  the directive to the vectors file, and rule 1 already made a nullability
-  violation a failure. Vigil's 2.0 exporter writes none of them, and a real 2.0
-  export from Vigil 2.3.2 verifies under 2.1.0's reference verifier. It refuses
-  to export records without a genesis, and it exports a store with no records
-  and no genesis as `"genesis": null`, which reports `empty`, or `truncated`
-  when its anchor counts records, as under 2.0.0.
+  recognises. Section 2.2 already made any field outside a kind's list a new
+  tag, section 4.2.1 already confined the directive to the vectors file, and
+  rule 1 already made a nullability violation a failure. The last two fall under
+  2.1.0's own ground in section 7.1: each lacks a member, or a declared version,
+  as every 2.0 producer wrote it. Vigil's 2.0 exporter writes none of them, and
+  a real 2.0 export from Vigil 2.3.2 verifies under 2.1.0's reference verifier.
+  It refuses to export records without a genesis, and it exports a store with no
+  records and no genesis as `"genesis": null`, which reports `empty`, or
+  `truncated` when its anchor counts records, as under 2.0.0.
 - The reference verifier's interface changed: `schema()` returns the Nullable
   column as a third element, `preimage()` no longer expands `$repeat`,
   `expand_vector_record()` takes the kind, and `record()`, `parse_document()`,
