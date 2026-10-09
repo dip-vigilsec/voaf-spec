@@ -7,11 +7,13 @@ Vigil carries a revision 3 copy at `docs/specs/voaf-2.0-test-vectors.json`.
 Companion reference verifier: `spec/2.0/reference-verifier.rs`, which
 `verifier/tests/vectors.rs` runs against every vector. It began as the preimage
 module of Vigil's vigil-verify and is now ahead of it: vigil-verify gains these
-2.1.0 checks in a later pull request. It is not a verifier written from this
-document; acceptance criterion 3 asks for one of those, and none is published
+2.1.0 checks in a later pull request. It is not written from this document;
+acceptance criterion 3 asks for a hasher that is, and none is published
 (section 8).
 Companion document format: `voaf-2.0-document.md`, owned by C-verify. It is not
-published; section 7 states what a verifier requires of a document.
+published. Section 7 defines the four top-level members a verifier reads in a
+2.x document, `voaf_version`, `records`, `genesis` and `anchor`, and a verifier
+ignores every other top-level member.
 Supersedes, for 2.x, the 1.0 hash computation: the Hash Chain Verification
 section of this repository's README, and the Hash Computation section of Vigil's
 `docs/VOAF_SPEC.md`.
@@ -21,9 +23,10 @@ section of this repository's README, and the Hash Computation section of Vigil's
 by file and line describe the tree when revision 3 was written, before C.2
 landed, and are kept as history; they are not claims about Vigil 2.3.2.
 
-This document defines the exact bytes hashed for every chained record, and
-nothing else. The JSON envelope that carries those records belongs to the
-document format. Nothing in Track C may define or vary the preimage.
+This document defines the exact bytes hashed for every chained record, and, in
+section 7, the four top-level members of a 2.x document a verifier reads and the
+checks it makes. The rest of the envelope belongs to the document format.
+Nothing in Track C may define or vary the preimage.
 
 ### Revision history
 
@@ -46,18 +49,21 @@ directive with anything written beside it. Revision 4 forbids each inside a
 record, by validation alone: the document is parsed with no repeated member name,
 and section 7 rule 1 lists every check a record makes to decode. Members outside
 the records stay outside every hash, the document's declared format among them
-(section 9), and section 7 says what a verifier does with the one member that
-decides how a document is walked.
+(section 9), and section 7 says which of them a verifier reads and what it does
+with each.
 
 It also adds two `gate_decision.decision` tokens (section 4.7.1), defines every
 (`verdict`, `decision`) pair and what an allow is (section 4.4.1), scopes the
 section 4.4 NULL-delivery rule to the held call and says what a present delivery
 hash shows, corrects the 2.0.0 description of `client_disconnected` as an erratum
 (section 7.1), says how a verifier treats a pair it does not recognise and how
-that vocabulary is versioned (section 7), lists where Vigil 2.3.2 does not meet
-the definitions (appendix A), and fixes the citations. The reference verifier
-enforces all of section 7 rule 1 and the relabel check, and the vectors file gains
-six positive and fifteen negative vectors. No revision 3 record, hash or chain
+that vocabulary is versioned, defines the document members a verifier reads and
+the checks it makes on the chain and the carried anchor, and gives every check a
+code and a verdict (section 7), lists where Vigil 2.3.2 does not meet the
+definitions (appendix A), and fixes the citations. The reference verifier makes
+every section 7 check on a 2.x document, though it does not walk a 1.0 document,
+and the vectors file gains six positive and eighteen negative vectors and nine
+negative documents. No revision 3 record, hash or chain
 value changed; one mutation description and three vector notes were corrected.
 
 ## 1. Why this replaces the v1 construction
@@ -417,7 +423,9 @@ exactly as a literal value would be.
 This is a property of the vectors file, not of the preimage or of any stored
 record. A loader for the vectors file expands the directive in `vectors[].record`
 before the record is decoded, and nowhere else: not in `negative_vectors[]`,
-whose records are written as a document carries them.
+whose records are written as a document carries them. So `neg_field_over_limit`
+carries its 1,048,577-byte `user_message` literally, the one value in the file
+past a reviewable size.
 
 **A document never carries the directive, and a verifier never expands it.** In
 a document it is a JSON object in a field section 4 declares a string, and an
@@ -428,8 +436,8 @@ document would hash the expansion and nothing else, so any member written beside
 is that case.
 
 The directive is specified here because acceptance criterion 3 asks that a
-verifier written from this document alone evaluate every vector, and without this
-paragraph two vectors cannot be evaluated.
+hasher written from this document alone reproduce every positive vector hash, and
+without this paragraph two of them cannot be reproduced.
 
 ### 4.2.2 A body that is not valid UTF-8
 
@@ -697,8 +705,10 @@ that a re-anchor after the `unanchored` state be recorded as a chain event, and
 none of the four covers it. Flagged as an addition rather than made silently.
 
 On graceful shutdown the head anchor is written **immediately after** the
-`shutdown` record commits, so the anchor and the chain head are the same event
-and a clean quit can never leave the anchor lagging.
+`shutdown` record commits, so the anchor covers the `shutdown` record and every
+record before it. That is not always the chain head: a `shutdown_deny` the
+producer records while it shuts down can follow the `shutdown` record, and it
+then falls in the unanchored tail of section 6 (section 4.7.1).
 
 ### 4.8 `transport` and `background` are not specifiable yet
 
@@ -725,9 +735,8 @@ hash-valued fields are never hex-decoded governs the enumerated preimage
 *fields*; `install_nonce` is not one of them and never appears in a preimage.
 Both operands are fixed length so the concatenation is unambiguous.
 
-The genesis is carried in no record. A verifier obtains it from the document's
-metadata, which belongs to the unpublished document format; Vigil's exporter
-writes it as the document's top-level `genesis` member.
+The genesis is carried in no record. A verifier reads it from the document's
+top-level `genesis` member (section 7), which Vigil's exporter writes.
 
 The property this buys, stated narrowly: **a party who has never observed any
 record or export from this install cannot guess its genesis.** Revision 1 said
@@ -786,6 +795,10 @@ exist, so a single item cannot be updated atomically. Two keychain accounts,
 carrying a monotonic generation counter; the reader takes the higher generation
 that parses. A torn write costs one generation, never the anchor.
 
+The table compares the device's store with its keychain anchor. It does not apply
+to an exported document: section 7 is the complete set of checks a verifier makes
+on one, the anchor the document carries included.
+
 | Store versus anchor | Chain state |
 | --- | --- |
 | anchor absent or `entry_count` 0, no rows | `empty` |
@@ -834,31 +847,65 @@ any depth, repeats a member name (RFC 7493 section 2.3). A parser that keeps one
 of two members with the same name has already discarded the other, and the copy
 it discards is text no hash covers, so this is checked while parsing, never on the
 parsed value. A document that repeats a member name does not verify, and none of
-its records is walked (`duplicate_member`). `neg_duplicate_member` and
-`neg_duplicate_member_mirror` are that case, for a parser that keeps the last
-copy and for one that keeps the first.
+its records is walked (`duplicate_member`). The top-level object is no exception:
+of two `records` members a parser keeps one, and the other carries a copy of the
+chain that no check reads. `neg_duplicate_member` and
+`neg_duplicate_member_mirror` are that case, for a parser that keeps the last copy
+and for one that keeps the first, and `doc_duplicate_records` is that case at
+the top level. Text that is not one JSON value is not walked either
+(`invalid_json`).
 
-Then the document's format is settled. Its declared version, `voaf_version`, or
-`voaf` on each entry of a 1.0 array of entries, is a member no hash covers, and it
-decides whether content is checked at all. A verifier cannot always detect a
-relabelled 2.x document: one stripped of every member only 2.x defines reads as a
-1.0 document. The protection is the 1.0 verdict, which never asserts content
+Then the document's format is settled: the format check. Its declared version,
+`voaf_version`, or `voaf` on each entry of a 1.0 array of entries, is a member
+no hash covers, and it decides whether content is checked at all. A declared
+version is digits and dots: runs of the ASCII digits `0` to `9` separated by
+single dots, such as `1.0.0` or `2.1.0`. A version whose first run is exactly
+`1` declares 1.x, and one whose first run is exactly `2` declares 2.x; any other
+first run, `01` and `02` included, is not recognised. Anything else, a missing
+or non-string version included, is rejected and never walked
+(`unrecognised_format`), and so is a top-level value that is neither an object
+nor an array of entries each declaring 1.x. A verifier cannot always detect a
+relabelled 2.x document: one stripped of every member only 2.x defines reads as
+a 1.0 document. The protection is the 1.0 verdict, which never asserts content
 integrity (below). What a verifier can detect, it MUST reject: a document that
 declares 1.x and carries structure only 2.x defines, a `records` member or an
-entry carrying `event_kind`, `seq` or `timestamp_us`, is rejected and never walked
-link-only (`format_mismatch`). No 1.0 document carries any of these: the 1.0
-schema forbids them on an entry, and Vigil's 1.0 exporter wrote none.
+entry carrying `event_kind`, `seq` or `timestamp_us`, is rejected and never
+walked link-only (`format_mismatch`). No 1.0 document carries any of these: the
+1.0 schema forbids them on an entry, and Vigil's 1.0 exporter wrote none.
 `neg_relabelled_1_0` is that case; a verifier without this check may reject it
 first at a link instead (`link_break`), depending on its 1.0 walk.
 
-The checks below constrain records. Every member outside the records, the
-declared format and the genesis among them, is covered by no record hash
-(section 9).
+A 2.x document is an object, and a verifier reads four of its members (the
+document member check):
 
-For each record in `seq` order:
+| Member | Holds |
+| --- | --- |
+| `voaf_version` | a string, the declared version; required |
+| `records` | an array, the records; required |
+| `genesis` | a string, the section 5 genesis that record 0 links to; required |
+| `anchor` | an object holding `entry_count`, a non-negative integer, and `head_hash`, a string: the section 6 head anchor as the exporter carried it; optional |
+
+Every other top-level member is ignored, and so is every member of `anchor` but
+those two. `records`, `genesis` or `anchor` written as `null` counts as absent;
+Vigil's exporter writes `"anchor": null` when it has no anchor. A 2.x document
+without `records` or `genesis` is rejected and never walked (`missing_member`),
+and so is one whose `records` is not an array or whose `genesis` is not a string
+(`malformed_member`). The anchor's `entry_count` is read when it is a JSON number
+whose value is a non-negative integer, in any notation (`13`, `13.0` and `1.3e1`
+are one count, and a count of 2^64 or more exceeds every record count), and its
+`head_hash` when it is a string. An anchor whose `entry_count` cannot be read is
+no anchor. The document's record count is the number of elements of `records`.
+
+The checks below constrain the records, the chain they form, and the anchor
+carried with them. Every member outside the records, the declared format, the
+genesis and the anchor among them, is covered by no record hash (section 9).
+
+Records are walked in ascending `seq` order; the order in which `records` lists
+them is not significant. For each record:
 
 1. Decode every field into its declared type. Each of these is a hard failure at
-   that index, with the code a vector names for it:
+   that index, with its code:
+   - a record that is not a JSON object, `null` included (`wrong_type`);
    - a member other than `seq`, `prev_hash`, `id`, `timestamp_us`, `event_kind`,
      `hash` and the fields section 4 declares for the record's kind
      (`unknown_member`). Section 2.2 makes any other field a new tag, so no
@@ -873,10 +920,10 @@ For each record in `seq` order:
      declared scalar type, a non-array where it declares an array, an element
      that is not of the declared element type, or an `event_kind` or `hash` that
      is not a string (`wrong_type`). Nothing in a document is expanded or
-     unwrapped (section 4.2.1). A NULL is never reported as a wrong type;
+     unwrapped (section 4.2.1). A NULL member is never reported as a wrong type;
    - a NULL in a field the table marks not nullable, the envelope fields and
-     `features_canonical` included (`null_field`), and a NULL array element
-     (`null_element`, section 2);
+     `features_canonical` included, and a NULL `event_kind` or `hash`
+     (`null_field`), and a NULL array element (`null_element`, section 2);
    - a `u32be` length or count header that exceeds a section 2.1 limit
      (`over_limit`). This check is on the header, never on the value of a
      `_length` field.
@@ -912,22 +959,69 @@ For each record in `seq` order:
    person, so that a document cannot forge or hide the verifier's own output.
 3. Recompute the preimage from the record's own fields, `SHA256` it, and compare
    to the stored hash, the record's `hash` member (`hash_mismatch`).
-4. Check `prev_hash` equals the previous record's **stored** hash
-   (`link_break`).
+4. Check `prev_hash` equals the **stored** hash of the record before it in the
+   walk, the record with the next lower `seq` (`link_break`). Where several
+   records carry that `seq`, the link holds if it equals the stored hash of any of
+   them. A record at the lowest `seq` has no record before it, and rule 4 does not
+   apply to it: at `seq` 0 its link to the genesis is a chain check, below.
 
-Additionally:
+A failure of any of rules 1 to 4 makes the chain `broken`.
 
-- Record at `seq` 0 MUST be a `chain_upgrade` whose `prev_hash` equals the
-  section 5 genesis. Otherwise the chain is `truncated`, never `verified`.
-- `seq` MUST increase by exactly 1 between consecutive records. A gap is
-  `truncated`.
-- A document with zero records reports `empty`. Never `verified`.
-- A document whose carried anchor `entry_count` exceeds its record count reports
-  `truncated`.
+Then the chain as a whole:
+
+- `seq` MUST be unique. A `seq` that two records carry makes the chain `broken`
+  (`duplicate_seq`). It is not also a gap.
+- With at least one record in the walk, the walk MUST start at `seq` 0. A lowest
+  `seq` other than 0, a negative one included, is `root_missing`. When it is 0,
+  every record at `seq` 0 MUST be a `chain_upgrade` (`root_not_chain_upgrade`)
+  whose `prev_hash` equals the document's `genesis` (`root_genesis_mismatch`).
+  Each of these failures makes the chain `truncated`, never `verified`.
+- Between consecutive distinct `seq` values of the walk, `seq` MUST increase by
+  exactly 1. A step of more than 1 is a gap, and makes the chain `truncated`
+  (`seq_gap`). A gap whose links hold, the record after it linked to the record
+  before it, is `truncated` and nothing more. A record deleted from the middle of
+  a chain leaves the record after the hole linked to the deleted record, which
+  rule 4 fails, so such a deletion is `broken`. Record 0 deleted is
+  `root_missing`, and the last record deleted shows only against the anchor.
+- The carried anchor, checked against the records:
+  - an `entry_count` above the record count makes the chain `truncated`
+    (`anchor_exceeds_records`). With zero records, that is any `entry_count`
+    above 0;
+  - otherwise, with `entry_count` above 0 and a `head_hash`, `head_hash` MUST
+    equal the stored hash of the record at position `entry_count - 1` of the walk,
+    counting from 0, or, where several records carry that record's `seq`, of one
+    of them. A `head_hash` that differs makes the chain `broken`
+    (`anchor_head_mismatch`). One that matches while `entry_count` is below the
+    record count leaves an unanchored tail: the verdict stands, and the verifier
+    MUST report an unanchored tail of N records, N being the record count less
+    `entry_count`;
+  - with `entry_count` above 0 and no `head_hash`, the head check is not made, and
+    the verdict stands;
+  - otherwise, with no anchor, or with an `entry_count` of 0 while records are
+    present, the verdict stands, and the verifier MUST report that truncation of
+    the chain's tail cannot be detected from this document.
+- A document with zero records reports `empty`, never `verified`, unless its
+  anchor counts records it does not hold (above).
 - In a store, rows carrying `chain_version = 1` are not part of the 2.0 chain and
   are not walked. They are verified, if at all, as a 1.0 document in link-only
   mode. A document's records carry no such member: a `chain_version` member fails
   rule 1.
+
+The chain checks are made whatever rules 1 to 4 find, and each finding is
+reported with its code. They read a record's `seq` only where it is an integer,
+and its `event_kind`, `prev_hash` and `hash` only where each is a string: a
+value that fails rule 1 is reported there and not again, and a record with no
+integer `seq` has no place in the walk. The verdict is `broken` if any finding
+makes the chain `broken`, otherwise `truncated` if any makes it `truncated`,
+otherwise `empty` for zero records and `verified` for any.
+
+**The carried anchor and genesis are self-asserted.** No record hash covers
+either (section 9), and whoever writes a document writes both. The checks above
+catch a document that is inconsistent with itself: records deleted, cut or
+replaced while the carried values were left as they were. They do not catch a
+document rewritten whole, its records re-linked from its genesis and its anchor
+rewritten to match. Section 6 compares the device's store with its keychain, and
+it does not apply to a document.
 
 The walk advances from the **stored** hash, so a break does not cascade. The
 reported index bounds the break rather than naming the culprit: a record altered
@@ -939,6 +1033,39 @@ A 2.x verifier reading a 1.0 document verifies linkage only and states that
 content was not covered. A 1.0 verdict never asserts content integrity, and
 never matches a 2.x verdict: a verifier MUST NOT report a 1.0 document, in any
 output, with a verdict a 2.x document can also receive.
+
+A document that fails the parse check (`invalid_json`, `duplicate_member`), the
+format check (`unrecognised_format`, `format_mismatch`) or the document member
+check (`missing_member`, `malformed_member`) is `rejected`: none of its records is
+walked, and it gets no other verdict. `rejected` is given before any walk and
+asserts nothing about either format; the rule above governs the verdicts of a
+walk. Every code this section gives, and the verdict it carries:
+
+| Code | Check | Verdict |
+| --- | --- | --- |
+| `invalid_json` | the text is not one JSON value | `rejected` |
+| `duplicate_member` | an object, at any depth, repeats a member name | `rejected` |
+| `unrecognised_format` | no declared version this section recognises | `rejected` |
+| `format_mismatch` | a 1.x declaration on structure only 2.x defines | `rejected` |
+| `missing_member` | a 2.x document without `records` or `genesis` | `rejected` |
+| `malformed_member` | `records` not an array, or `genesis` not a string | `rejected` |
+| `unknown_member` | rule 1: a member outside the record's fields | `broken` |
+| `missing_field` | rule 1: a member that is missing | `broken` |
+| `wrong_type` | rule 1: a record that is not an object, or a value not of its declared type | `broken` |
+| `null_field` | rule 1: a NULL where none is allowed | `broken` |
+| `null_element` | rule 1: a NULL array element | `broken` |
+| `over_limit` | rule 1: a length or count header above a limit; rule 2: a preimage above the limit | `broken` |
+| `unknown_kind` | rule 2: an `event_kind` with no schema | `broken` |
+| `feature_arity` | rule 2: `features_canonical` without exactly 27 elements | `broken` |
+| `hash_mismatch` | rule 3: the recomputed hash is not the stored hash | `broken` |
+| `link_break` | rule 4: `prev_hash` is not the stored hash before it | `broken` |
+| `duplicate_seq` | a `seq` two records carry | `broken` |
+| `anchor_head_mismatch` | `head_hash` is not the stored hash at position `entry_count - 1` | `broken` |
+| `root_missing` | the lowest `seq` is not 0 | `truncated` |
+| `root_not_chain_upgrade` | the record at `seq` 0 is not a `chain_upgrade` | `truncated` |
+| `root_genesis_mismatch` | the record at `seq` 0 does not link to the `genesis` | `truncated` |
+| `seq_gap` | `seq` skips a value | `truncated` |
+| `anchor_exceeds_records` | `entry_count` above the record count | `truncated` |
 
 ### 7.1 Versioning the `gate_decision` vocabulary
 
@@ -952,17 +1079,40 @@ field order or a field type. A major release under this section does not re-root
 the chain either; the section 5.1 pattern belongs to a new tag.
 
 A release that changes no preimage byte is also minor when the only documents it
-newly rejects repeat a member name (RFC 7493 section 2.3), have records that carry
-members or content no record hash covers, or break a rule an earlier release
-already stated, the 1.0 schema included, that its reference verifier did not
-enforce. Members outside the records stay outside every hash, so they are not a
-ground for rejection. Spec release 2.1.0 is such a release. It rejects a repeated
-member name; a member outside the record's fields, the vectors-file directive in a
-document and a `hash` that is not a string, each text no record hash covers; and a
-NULL the section 4 tables forbade, a missing field 2.0.0's rule 1 already failed
-(a field that is absent does not decode), and a 1.x declaration on entries the 1.0
-schema forbids, each a rule already stated. Every document a 2.0 producer actually
-emitted still verifies under 2.1.0: a real export from Vigil 2.3.2 does.
+newly fails, documents it rejects or reports `broken` or `truncated` where an
+earlier release did not, repeat a member name (RFC 7493 section 2.3), have
+records that carry members or content no record hash covers, or break a rule an
+earlier release already stated, the 1.0 schema included, that its reference
+verifier did not enforce. A top-level member a verifier does not read stays
+outside every hash, so it is not a ground for rejection. A repeated member name
+is, at the top level as at any depth: of two `records` members a parser keeps
+one, and the other carries a copy of the chain that no check reads.
+
+Spec release 2.1.0 is such a release, with one exception, below. It fails a
+repeated member name. It fails a member outside the record's fields, the
+vectors-file directive in a document and a `hash` that is not a string, each text
+no record hash covers. It fails these, each a rule already stated: a NULL the
+section 4 tables forbade; a missing field, which 2.0.0's rule 1 already failed (a
+field that is absent does not decode); a document that declares 1.x and carries
+structure only 2.x defines (a `records` member, or an entry carrying
+`event_kind`, `seq` or `timestamp_us`), and a 1.0 array of entries in which an
+entry does not declare 1.x, neither of which the 1.0 schema allows; a repeated
+`seq`, which 2.0.0 already forbade (section 4.0 made `seq` unique and gapless, and
+section 7 made it increase by exactly 1) without naming a verdict; and a
+carried anchor whose `head_hash` is not the stored hash of the record it counts
+to, which is what 2.0.0's section 6 defined `head_hash` to be.
+
+The exception is the document members section 7 reads, which 2.0.0 left to the
+unpublished document format. 2.1.0 rejects a 2.x document without `records` or
+`genesis`, with either of the wrong type, or without a declared version section
+7 recognises. A document with records and no genesis never verified under 2.0.0,
+which rooted record 0 at the genesis. The documents 2.0.0 did not fail and 2.1.0
+does are those without `records` or with `records` not an array, those with zero
+records and a `genesis` that is missing or not a string, which 2.0.0 reported
+`empty`, and those whose declared version section 7 does not recognise. Vigil
+2.3.2 writes one of them: its export of a store with no records and no genesis,
+which carries `"genesis": null`. Every document a 2.0 producer actually emitted
+with records still verifies under 2.1.0: a real export from Vigil 2.3.2 does.
 
 **Erratum.** 2.0.0 said, in section 4.4, that the `client_disconnected` outcome
 is exactly the case of "a hold whose client left mid-hold", which "delivered no
@@ -987,14 +1137,17 @@ itself.
    by calls to it.
 2. Every vector in `spec/2.0/test-vectors.json` reproduces byte for byte in Rust,
    against both `preimage_hex` where present and `preimage_sha256` always.
-3. A Python verifier under 150 lines, written by C-verify from this document
-   alone, reproduces every vector hash without reading the Rust. The budget is
-   150 rather than 100 because a from-prose implementation measured 98 lines only
-   under deliberately dense formatting and about 135 naturally. The point of the
-   budget is that the verifier stays auditable by eye, not that it hits a round
-   number. Not met for spec release 2.1.0: no verifier written from the prose is
-   published. The reference verifier, `spec/2.0/reference-verifier.rs`, is
-   Vigil's verifier code and does not meet this criterion.
+3. A Python hasher under 150 lines, written by C-verify from this document
+   alone, reproduces every positive vector hash without reading the Rust. The
+   criterion measures a hasher: the section 2 encoding over the section 4 tables.
+   The budget is 150 rather than 100 because a from-prose implementation measured
+   98 lines only under deliberately dense formatting and about 135 naturally. The
+   point of the budget is that the hasher stays auditable by eye, not that it hits
+   a round number. A full verifier, which also makes the section 7 checks, is
+   longer and is not held to the budget. Not met for spec release 2.1.0: no hasher
+   written from the prose is published. The reference verifier,
+   `spec/2.0/reference-verifier.rs`, is not written from the prose and does not
+   meet this criterion.
 4. **Altering any field value, the format tag, or the field count changes the
    hash.** Field types are fixed per tag by the section 4 tables; a type change
    is a tag bump, not something the encoding detects.
@@ -1008,12 +1161,17 @@ itself.
    carries a case for each, alongside the tag-mutation and field-count-mutation
    cases that exercise criterion 4; these revision 3 cases name no `violation`.
    From revision 4 it also carries a case for the section 7 parse check, for the
-   2.x-structure check, and for each section 7 rule 1 check without which a record
-   could verify, each naming the `violation` it must produce; a decision edited
-   without re-hashing, which rule 3 fails; and a nullable field left out, which
-   2.0.0's rule 1 already failed and its reference verifier already rejected. The
-   checks that `event_kind` and `hash` are present, and that `event_kind` is a
-   string, have no case: without them a verifier cannot pick a table or compare a
+   2.x-structure check, and for each section 7 rule 1 check without which a
+   record could verify, each naming the `violation` it must produce; a decision
+   edited without re-hashing, which rule 3 fails; and a nullable field left out,
+   which 2.0.0's rule 1 already failed and its reference verifier already
+   rejected. Three of the rule 1 cases, `neg_field_over_limit`,
+   `neg_held_ms_string` and `neg_id_null`, are checks the v2.0.0 reference
+   verifier also made. The `negative_documents` array carries a whole document
+   for each of nine chain and document checks, each naming its verdict and
+   codes. The checks that a record is an object, that `event_kind` and `hash`
+   are present and not NULL, and that `event_kind` is a string, have no case:
+   without them a verifier cannot decode the record, pick a table or compare a
    hash, so it rejects the record anyway. Each case's `stored_hash` is what a
    reader without its check computes, and section 8.1 says which reader that is.
    Vigil's own 2.0 verifier reports the relabel case verified.
@@ -1023,9 +1181,10 @@ itself.
 
 ### 8.1 The companion vectors file
 
-Acceptance criterion 3 asks for a verifier written from this document alone, so
-every member of `spec/2.0/test-vectors.json` that an implementation reads is
-specified here, and the rest are marked informative.
+Acceptance criterion 3 asks for a hasher written from this document alone, and a
+verifier can be written the same way, so every member of
+`spec/2.0/test-vectors.json` that an implementation reads is specified here, and
+the rest are marked informative.
 
 | Field | Meaning |
 | --- | --- |
@@ -1050,10 +1209,16 @@ specified here, and the rest are marked informative.
 | `negative_vectors[].expected_outcome`, `negative_vectors[].requirement` | In prose, how the case fails and the rule it exercises |
 | `negative_vectors[].record` | Present from revision 4: a whole record exactly as a document carries it, `event_kind` and `hash` included, never expanded, that must fail section 7 at that record. In it, an object shaped like the section 4.2.1 directive is a literal value |
 | `negative_vectors[].record_json` | Present from revision 4: a record as JSON text, for a case a parsed object cannot hold. It fails the section 7 parse check |
-| `negative_vectors[].document` | Present from revision 4: a whole document, for a check made before any record. `neg_relabelled_1_0` fails the section 7 relabel check |
-| `negative_vectors[].violation` | Present from revision 4 on every vector that carries `record`, `record_json` or `document`: the check it fails, by the code section 7 gives it. Used here: `duplicate_member`, `format_mismatch`, `unknown_member`, `missing_field`, `wrong_type`, `null_field`, `null_element`, `hash_mismatch` and `link_break`. Section 7 also defines `over_limit`, `unknown_kind` and `feature_arity` |
+| `negative_vectors[].document` | Present from revision 4: a whole document, for a check made before any record. `neg_relabelled_1_0` fails the section 7 format check (`format_mismatch`) |
+| `negative_vectors[].violation` | Present from revision 4 on every vector that carries `record`, `record_json` or `document`: the check it fails, by the code section 7 gives it. Used here: `duplicate_member`, `format_mismatch`, `unknown_member`, `missing_field`, `wrong_type`, `null_field`, `null_element`, `over_limit` and `hash_mismatch`. Section 7 lists every code |
 | `negative_vectors[].acceptable_violations` | Present where a verifier that lacks the vector's check still rejects it at another: every code a verifier may then report. `violation` is the vector's own check, the one the reference verifier produces |
-| `negative_vectors[].stored_hash` | The hash the record's `hash` member carries. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In every other vector it is what a reader without the failing check computes: for a repeated name, a parser that keeps the last copy (`neg_duplicate_member`) or the first (`neg_duplicate_member_mirror`); for a missing field, a reader that takes it as NULL; for a non-string `hash`, the v2.0.0 reference verifier, which never reads it; otherwise the v2.0.0 reference verifier. So only that check rejects the record, except where `acceptable_violations` names a second |
+| `negative_vectors[].stored_hash` | The hash the record's `hash` member carries. In `neg_decision_edited_without_rehash`, `expected_hash` is what recompute gives instead, so rule 3 fails. In every other vector it is what a reader without the failing check computes: for a repeated name, a parser that keeps the last copy (`neg_duplicate_member`) or the first (`neg_duplicate_member_mirror`); for a missing field, a reader that takes it as NULL; for a non-string `hash`, the v2.0.0 reference verifier, which never reads it; for a field over a limit, a reader that writes the header it finds; for a string in an integer field, a reader that takes the marker from the declared type; for a NULL envelope field, a reader that writes the NULL marker; otherwise the v2.0.0 reference verifier. So only that check rejects the record, except where `acceptable_violations` names a second |
+| `negative_documents[]` | Present from revision 4: whole documents that must not verify, for the chain checks and the document checks of section 7 |
+| `negative_documents[].name`, `negative_documents[].mutation`, `negative_documents[].expected_outcome`, `negative_documents[].requirement` | The case's name; in prose, the document and what was changed in it; how it fails; and the rule it exercises |
+| `negative_documents[].document` | The document, as a verifier reads it. Its records are written as a document carries them, `event_kind` and `hash` included, and never expanded |
+| `negative_documents[].document_json` | The document as JSON text, for a case a parsed object cannot hold |
+| `negative_documents[].expected_verdict` | The section 7 verdict |
+| `negative_documents[].expected_codes` | Every code a verifier that makes every section 7 check reports for the document, each once, in no particular order. No negative document holds a record that fails rule 1, 2 or 3 |
 | `spec`, `revision`, `supersedes`, `generated_for`, `revision_4`, `hash`, `markers`, `limits`, `repeat_directive`, `feature_slots`, `genesis.construction`, `genesis.cases[].note`, `chain.note`, `chain.membership` | Informative: this file's history, and restatements of sections 2, 2.1, 3 and 4.2.1. `limits.max_content_bytes` is the section 2.1 per-field limit, which applies to every string and integer field, not content only |
 
 `neg_tag_mutated` writes the tag `voaf-2.1` only to show that the hash moves
@@ -1082,7 +1247,10 @@ the failure this feature exists to prevent.
   2.4.
 - **The chain is unkeyed and the export is unsigned.** An off-device verifier
   cannot distinguish a genuine export from a hand-written one. The section 6
-  anchor is the only truncation detection and it lives on the device.
+  anchor in the device's keychain is the only truncation detection that does not
+  rest on the document. The anchor and genesis a document carries are
+  self-asserted: section 7's checks against them catch a document inconsistent
+  with itself, not one rewritten whole.
 - **Provenance is not established.** `POST /api/ingest` is auth-exempt and
   cross-origin-exempt by design, so a record's presence does not prove Vigil
   observed the traffic it describes.
@@ -1096,9 +1264,11 @@ the failure this feature exists to prevent.
   (`allow`, `restore`) they are digests of files, which a holder of the file can
   reproduce.
 - **Members outside the records are covered by no hash.** The declared format,
-  the genesis, the anchor and any exporter metadata travel with the document and
-  are checked only as section 7 says. Section 7's checks constrain records; the
-  document's top-level members stay outside every hash.
+  the genesis, the anchor and any exporter metadata travel with the document. A
+  verifier reads the first three as section 7 says and ignores the rest. Section 7
+  checks the records against the carried genesis and anchor, which catches a
+  document inconsistent with itself, not one rewritten whole. The document's
+  top-level members stay outside every hash.
 - **Keychain items are software-protected** by an ACL bound to the sidecar's
   signing identity. They are not hardware-bound. No document may say otherwise.
 - **`encryption_at_rest` describes the store.** An exported document written to

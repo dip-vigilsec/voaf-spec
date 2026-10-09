@@ -9,9 +9,11 @@ use serde_json::Value;
 use voaf_reference_verifier as voaf;
 
 const VECTORS: &str = include_str!("../../spec/2.0/test-vectors.json");
+const SPEC: &str = include_str!("../../spec/2.0/preimage.md");
 
 const POSITIVE: usize = 24;
-const NEGATIVE: usize = 19;
+const NEGATIVE: usize = 22;
+const NEGATIVE_DOCUMENTS: usize = 9;
 const CHAIN: usize = 13;
 
 fn file() -> Value {
@@ -24,6 +26,10 @@ fn positives(d: &Value) -> &Vec<Value> {
 
 fn negatives(d: &Value) -> &Vec<Value> {
     d["negative_vectors"].as_array().expect("negative_vectors")
+}
+
+fn negative_documents(d: &Value) -> &Vec<Value> {
+    d["negative_documents"].as_array().expect("negative_documents")
 }
 
 fn by_name<'a>(d: &'a Value, name: &str) -> &'a Value {
@@ -152,22 +158,6 @@ fn the_chain_walks_from_the_genesis_to_the_head() {
     assert_eq!(prev, d["chain"]["head_hash"].as_str().unwrap(), "head");
 }
 
-/// The section 7 rule a decode error breaks, as the vectors file names it, so
-/// that the file states an outcome any implementation can check rather than one
-/// implementation's message text.
-fn violation(e: &voaf::PreimageError) -> &'static str {
-    use voaf::PreimageError::*;
-    match e {
-        UnknownMember(_) => "unknown_member",
-        MissingField(_) => "missing_field",
-        WrongType(_) => "wrong_type",
-        NullField(_) => "null_field",
-        NullElement(_) => "null_element",
-        FormatMismatch(_) => "format_mismatch",
-        _ => "other",
-    }
-}
-
 #[test]
 fn every_negative_vector_fails_where_it_says() {
     let d = file();
@@ -187,15 +177,24 @@ fn every_negative_vector_fails_where_it_says() {
             let text = text.as_str().unwrap();
             let err = voaf::parse_document(text).expect_err(name);
             assert!(err.to_string().contains("is repeated in one object"), "{}: {}", name, err);
-            // Without the check, a parser that keeps one copy computes stored_hash.
+            assert_eq!(Some(err.code()), want, "{}", name);
+            // Without the check, a parser that keeps one copy computes stored_hash,
+            // and one that keeps the other copy fails rule 3: the
+            // acceptable_violations both vectors list.
             let stored = nv["stored_hash"].as_str().unwrap();
             let last: Value = serde_json::from_str(text).unwrap();
             let first = first_copy_parse(text);
-            let hits = [&last, &first].iter().filter(|r| lenient_hash(r) == stored).count();
-            assert_eq!(hits, 1, "{}: exactly one of the two one-copy parsers accepts it", name);
+            let (accepted, other): (Vec<&Value>, Vec<&Value>) = [&last, &first].into_iter().partition(|r| lenient_hash(r) == stored);
+            assert_eq!(accepted.len(), 1, "{}: exactly one of the two one-copy parsers accepts it", name);
+            let (_, computed, s) = voaf::record(other[0]).unwrap_or_else(|e| panic!("{}: {}", name, e));
+            assert_ne!(computed, s, "{}: the other copy fails rule 3", name);
+            let ok = nv["acceptable_violations"].as_array().unwrap_or_else(|| panic!("{}: acceptable_violations", name));
+            assert!(ok.iter().any(|c| c == "hash_mismatch"), "{}: hash_mismatch is acceptable", name);
         } else if let Some(doc) = nv.get("document") {
             let err = voaf::document_format(doc).expect_err(name);
-            assert_eq!(Some(violation(&err)), want, "{}: {}", name, err);
+            assert_eq!(Some(err.code()), want, "{}: {}", name, err);
+            let report = voaf::verify_document(&serde_json::to_string(doc).unwrap());
+            assert_eq!((report.verdict, report.codes()), (voaf::Verdict::Rejected, vec![err.code()]), "{}", name);
             // Under 2.0.0 the document was walked link-only, and every link holds.
             assert!(link_only_walk_passes(doc), "{}: the link-only walk should pass", name);
         } else if nv.get("record").is_some() {
@@ -212,7 +211,7 @@ fn every_negative_vector_fails_where_it_says() {
                 assert_ne!(computed, s, "{}", name);
             } else {
                 let err = voaf::record(rec).expect_err(name);
-                assert_eq!(Some(violation(&err)), want, "{}: {}", name, err);
+                assert_eq!(Some(err.code()), want, "{}: {}", name, err);
                 // Without the failing check, a lenient reader computes stored_hash.
                 assert_eq!(lenient_hash(rec), stored, "{}: stored_hash", name);
             }
@@ -282,6 +281,9 @@ fn the_strict_parse_matches_serde_json() {
     assert!(voaf::parse_document("{\"a\": 1} {}").is_err(), "trailing content");
     assert!(voaf::parse_document("{\"a\": {\"b\": 1, \"b\": 1}}").is_err(), "a repeat at depth");
     assert!(voaf::parse_document("{\"a\": 1, \"\\u0061\": 1}").is_err(), "a repeat written with an escape");
+    assert_eq!(voaf::parse_document("{\"a\": {\"b\": 1, \"b\": 1}}").unwrap_err().code(), "duplicate_member");
+    assert_eq!(voaf::parse_document("{\"a\": 1} {}").unwrap_err().code(), "invalid_json");
+    assert_eq!(voaf::parse_document("{\"a\": ").unwrap_err().code(), "invalid_json");
 }
 
 /// The vectors-file loader clamps `count` before allocating, so a huge count
@@ -316,52 +318,58 @@ fn content_stripped_to_null_is_not_covered() {
     assert!(!voaf::content_covered("lifecycle", &rec));
 }
 
-/// The v2.0.0 reading of a record, for checking each negative vector's
-/// stored_hash: unknown members, `hash` and `event_kind` ignored, an absent field
-/// read as NULL, a NULL encoded as the marker anywhere, the directive expanded.
+/// A reader without rule 1, for checking each negative vector's stored_hash:
+/// unknown members, `hash` and `event_kind` ignored, an absent field read as
+/// NULL, a NULL encoded as the marker anywhere, the marker taken from the declared
+/// type whatever the JSON type of the value, no limit checked, and the directive
+/// expanded. On every record the v2.0.0 reference verifier accepted, it computes
+/// what that verifier computed.
 fn lenient_hash(rec: &Value) -> String {
     fn put(out: &mut Vec<u8>, m: u8, p: &[u8]) {
         out.push(m);
         out.extend_from_slice(&(p.len() as u32).to_be_bytes());
         out.extend_from_slice(p);
     }
-    fn scalar(out: &mut Vec<u8>, v: &Value) {
+    fn scalar(out: &mut Vec<u8>, v: &Value, m: u8) {
         match v {
             Value::Null => out.push(0),
-            Value::String(s) => put(out, 1, s.as_bytes()),
-            Value::Number(n) => put(out, 2, n.as_i64().unwrap().to_string().as_bytes()),
-            Value::Bool(b) => put(out, 3, if *b { b"1" } else { b"0" }),
+            Value::String(s) => put(out, m, s.as_bytes()),
+            Value::Number(n) => put(out, m, n.as_i64().unwrap().to_string().as_bytes()),
+            Value::Bool(b) => put(out, m, if *b { b"1" } else { b"0" }),
             Value::Object(o) => {
                 let r = &o["$repeat"];
                 let c = r["char"].as_str().unwrap();
                 let n = r["count"].as_u64().unwrap();
                 assert!(n <= 4096, "only small counts here");
-                put(out, 1, c.repeat(n as usize).as_bytes())
+                put(out, m, c.repeat(n as usize).as_bytes())
             }
             Value::Array(_) => panic!("an array where a scalar is declared"),
         }
     }
+    let marker = |ty: voaf::Ty| match ty {
+        voaf::Ty::Str | voaf::Ty::ArrStr => 1,
+        voaf::Ty::Int | voaf::Ty::ArrInt => 2,
+        voaf::Ty::Bool => 3,
+    };
     let kind = rec["event_kind"].as_str().unwrap();
     let mut out = Vec::new();
     put(&mut out, 1, voaf::TAG.as_bytes());
     put(&mut out, 2, voaf::field_count(kind).unwrap().to_string().as_bytes());
-    for n in ["seq", "prev_hash"] {
-        scalar(&mut out, &rec[n]);
-    }
+    scalar(&mut out, &rec["seq"], 2);
+    scalar(&mut out, &rec["prev_hash"], 1);
     put(&mut out, 1, kind.as_bytes());
-    for n in ["id", "timestamp_us"] {
-        scalar(&mut out, &rec[n]);
-    }
-    for (name, _, _) in voaf::schema(kind).unwrap() {
+    scalar(&mut out, &rec["id"], 1);
+    scalar(&mut out, &rec["timestamp_us"], 2);
+    for (name, ty, _) in voaf::schema(kind).unwrap() {
         match rec.get(*name).unwrap_or(&Value::Null) {
             Value::Array(items) => {
                 out.push(4);
                 out.extend_from_slice(&(items.len() as u32).to_be_bytes());
                 for it in items {
-                    scalar(&mut out, it);
+                    scalar(&mut out, it, marker(*ty));
                 }
             }
-            v => scalar(&mut out, v),
+            v => scalar(&mut out, v, marker(*ty)),
         }
     }
     sha256_hex(&out)
@@ -468,4 +476,321 @@ fn minus_zero_is_not_an_integer() {
     let v = voaf::parse_document("-0").unwrap();
     assert!(v.is_f64(), "{:?}", v);
     assert!(v.as_i64().is_none());
+}
+
+/// Every `basis` names a positive vector, so it can be looked up by name.
+#[test]
+fn every_basis_names_a_positive_vector() {
+    let d = file();
+    for nv in negatives(&d) {
+        by_name(&d, nv["basis"].as_str().unwrap_or_else(|| panic!("{}: basis", nv["name"])));
+    }
+}
+
+/// Section 7's code table: each code and the verdict it carries.
+fn section_7_codes() -> Vec<(&'static str, &'static str)> {
+    let section_7 = &SPEC[SPEC.find("\n## 7. Verification").unwrap()..SPEC.find("\n## 8. Acceptance").unwrap()];
+    section_7
+        .lines()
+        .filter(|l| l.starts_with("| `"))
+        .map(|l| l.split('|').map(str::trim).collect::<Vec<&str>>())
+        // The code table has three columns; the member table above it has two.
+        .filter(|cells| cells.len() == 5)
+        .map(|cells| (cells[1].trim_matches('`'), cells[3].trim_matches('`')))
+        .collect()
+}
+
+/// Every code the vectors file names is a row of the section 7 code table, and
+/// each negative document's verdict is the one its codes carry: `rejected` if
+/// any code is, otherwise `broken` if any is, otherwise `truncated`.
+#[test]
+fn every_code_a_vector_names_is_a_section_7_code() {
+    let d = file();
+    let table = section_7_codes();
+    assert_eq!(table.len(), 23, "section 7 code table rows");
+    let verdict_of = |code: &str| table.iter().find(|(c, _)| *c == code).unwrap_or_else(|| panic!("section 7 does not give {}", code)).1;
+    for nv in negatives(&d) {
+        for c in nv.get("violation").into_iter().chain(nv.get("acceptable_violations").and_then(Value::as_array).into_iter().flatten()) {
+            verdict_of(c.as_str().unwrap());
+        }
+    }
+    for nd in negative_documents(&d) {
+        let verdicts: Vec<&str> = nd["expected_codes"].as_array().unwrap().iter().map(|c| verdict_of(c.as_str().unwrap())).collect();
+        let want = ["rejected", "broken", "truncated"].into_iter().find(|v| verdicts.contains(v)).expect("a negative document names a code");
+        assert_eq!(nd["expected_verdict"].as_str().unwrap(), want, "{}", nd["name"]);
+    }
+}
+
+/// Each negative document, walked whole, gives exactly its verdict and codes.
+#[test]
+fn every_negative_document_gives_its_verdict_and_codes() {
+    let d = file();
+    let nds = negative_documents(&d);
+    assert_eq!(nds.len(), NEGATIVE_DOCUMENTS, "negative document count");
+    for nd in nds {
+        let name = nd["name"].as_str().unwrap();
+        let text = match (nd.get("document"), nd.get("document_json")) {
+            (Some(doc), None) => serde_json::to_string(doc).unwrap(),
+            (None, Some(Value::String(text))) => text.clone(),
+            _ => panic!("{}: exactly one of document and document_json", name),
+        };
+        let report = voaf::verify_document(&text);
+        let mut want: Vec<&str> = nd["expected_codes"].as_array().unwrap().iter().map(|c| c.as_str().unwrap()).collect();
+        want.sort_unstable();
+        assert_eq!(report.verdict.name(), nd["expected_verdict"].as_str().unwrap(), "{}: verdict", name);
+        assert_eq!(report.codes(), want, "{}: codes", name);
+        // Array order is not significant: the records reversed give the same.
+        if let Some(Value::Array(records)) = nd.get("document").and_then(|doc| doc.get("records")) {
+            let mut doc = nd["document"].clone();
+            doc["records"] = records.iter().rev().cloned().collect();
+            let reversed = walk(&doc);
+            assert_eq!((reversed.verdict, reversed.codes()), (report.verdict, want), "{}: reversed", name);
+        }
+    }
+}
+
+/// The chain as a document carries it: every `chain_member` vector in `seq`
+/// order, each with its expected hash as `hash`.
+fn chain_records(d: &Value) -> Vec<Value> {
+    let mut members: Vec<&Value> = positives(d).iter().filter(|v| v["chain_member"] == true).collect();
+    members.sort_by_key(|v| v["record"]["seq"].as_i64().unwrap());
+    members
+        .iter()
+        .map(|v| {
+            let mut r = expanded(v);
+            r["hash"] = v["expected_hash"].clone();
+            r
+        })
+        .collect()
+}
+
+fn chain_genesis(d: &Value) -> String {
+    let gi = d["chain"]["genesis_case_index"].as_u64().unwrap() as usize;
+    d["genesis"]["cases"][gi]["expected_genesis"].as_str().unwrap().to_string()
+}
+
+fn document(genesis: &str, records: &[Value], anchor: Option<(u64, &str)>) -> Value {
+    let mut doc = serde_json::json!({"voaf_version": "2.0", "genesis": genesis, "records": records});
+    if let Some((n, h)) = anchor {
+        doc["anchor"] = serde_json::json!({"entry_count": n, "head_hash": h});
+    }
+    doc
+}
+
+fn walk(doc: &Value) -> voaf::Report {
+    voaf::verify_document(&serde_json::to_string(doc).unwrap())
+}
+
+/// Section 7 on the chain, carried whole as a document, and on it with the
+/// anchor and the records changed one way at a time.
+#[test]
+fn the_chain_as_a_document_verifies_and_its_anchor_is_checked() {
+    use voaf::{Tail, Verdict::*};
+    let d = file();
+    let records = chain_records(&d);
+    let genesis = chain_genesis(&d);
+    let head = d["chain"]["head_hash"].as_str().unwrap();
+    let hash = |i: usize| records[i]["hash"].as_str().unwrap();
+    let n = CHAIN as u64;
+    let outcome = |doc: &Value| {
+        let r = walk(doc);
+        (r.verdict, r.codes(), r.tail)
+    };
+
+    assert_eq!(outcome(&document(&genesis, &records, Some((n, head)))), (Verified, vec![], Some(Tail::Anchored)));
+    // No anchor, a null one, or one that counts nothing: the verdict stands, and
+    // the tail cannot be checked.
+    assert_eq!(outcome(&document(&genesis, &records, None)), (Verified, vec![], Some(Tail::Undetectable)));
+    let mut null_anchor = document(&genesis, &records, None);
+    null_anchor["anchor"] = Value::Null;
+    assert_eq!(outcome(&null_anchor), (Verified, vec![], Some(Tail::Undetectable)));
+    assert_eq!(outcome(&document(&genesis, &records, Some((0, head)))), (Verified, vec![], Some(Tail::Undetectable)));
+    // A matching head over fewer records leaves an unanchored tail.
+    assert_eq!(outcome(&document(&genesis, &records, Some((n - 1, hash(11))))), (Verified, vec![], Some(Tail::Unanchored(1))));
+    assert_eq!(outcome(&document(&genesis, &records, Some((1, hash(0))))), (Verified, vec![], Some(Tail::Unanchored(n - 1))));
+    assert_eq!(outcome(&document(&genesis, &records, Some((n - 1, head)))), (Broken, vec!["anchor_head_mismatch"], None));
+    assert_eq!(outcome(&document(&genesis, &records, Some((n + 1, head)))), (Truncated, vec!["anchor_exceeds_records"], None));
+    // Array order is not significant.
+    let reversed: Vec<Value> = records.iter().rev().cloned().collect();
+    assert_eq!(outcome(&document(&genesis, &reversed, Some((n, head)))), (Verified, vec![], Some(Tail::Anchored)));
+    // Every top-level member section 7 does not read is ignored, and so is every
+    // member of the anchor but two.
+    let mut extra = document(&genesis, &records, Some((n, head)));
+    extra["tag"] = "voaf-2.0".into();
+    extra["head"] = "not checked".into();
+    extra["anchor"]["generation"] = 7.into();
+    assert_eq!(outcome(&extra), (Verified, vec![], Some(Tail::Anchored)));
+    // The entry_count is read on its own: with no head_hash to check, an anchor
+    // that counts more records than the document holds is still truncated.
+    // Without one, the head check is not made.
+    let mut headless = document(&genesis, &records, Some((n + 1, head)));
+    headless["anchor"]["head_hash"] = Value::Null;
+    assert_eq!(outcome(&headless), (Truncated, vec!["anchor_exceeds_records"], None));
+    headless["anchor"]["entry_count"] = n.into();
+    assert_eq!(outcome(&headless), (Verified, vec![], None));
+    // The count is read by its value, in any notation.
+    for count in ["13.0", "1.3e1"] {
+        let text = serde_json::to_string(&document(&genesis, &records, Some((n, head)))).unwrap();
+        let changed = text.replace("\"entry_count\":13", &format!("\"entry_count\":{}", count));
+        assert_ne!(changed, text, "the count is rewritten");
+        let r = voaf::verify_document(&changed);
+        assert_eq!((r.verdict, r.codes(), r.tail), (Verified, vec![], Some(Tail::Anchored)), "{}", count);
+    }
+    // An entry_count of 2^64 or more, which serde_json reads as a float, counts
+    // more records than any document holds.
+    let huge = serde_json::to_string(&document(&genesis, &records, Some((u64::MAX, head)))).unwrap();
+    let huge = huge.replace(&u64::MAX.to_string(), "18446744073709551616");
+    let r = voaf::verify_document(&huge);
+    assert_eq!((r.verdict, r.codes()), (Truncated, vec!["anchor_exceeds_records"]));
+    // Zero records. Without an anchor, truncation of the tail cannot be detected.
+    assert_eq!(outcome(&document(&genesis, &[], None)), (Empty, vec![], Some(Tail::Undetectable)));
+    assert_eq!(outcome(&document(&genesis, &[], Some((0, head)))), (Empty, vec![], None));
+    assert_eq!(outcome(&document(&genesis, &[], Some((1, head)))), (Truncated, vec!["anchor_exceeds_records"], None));
+    // Record 0. The lowest record has no record before it, so rule 4 does not
+    // apply to it.
+    assert_eq!(outcome(&document(&genesis, &records[1..], Some((n, head)))), (Truncated, vec!["anchor_exceeds_records", "root_missing"], None));
+    assert_eq!(outcome(&document(&genesis, &records[1..], Some((n - 1, head)))), (Truncated, vec!["root_missing"], Some(Tail::Anchored)));
+    let other_genesis = d["genesis"]["cases"][0]["expected_genesis"].as_str().unwrap();
+    assert_eq!(outcome(&document(other_genesis, &records, Some((n, head)))), (Truncated, vec!["root_genesis_mismatch"], Some(Tail::Anchored)));
+    // A record at seq -1 that recomputes: the walk starts there, so record 0 is
+    // missing from the start, and record 0 links to it, not to the genesis.
+    let mut below = records[0].clone();
+    below["seq"] = (-1).into();
+    below["hash"] = voaf::record_hash("chain_upgrade", &below).unwrap().into();
+    let mut with_below = vec![below];
+    with_below.extend(records.iter().cloned());
+    assert_eq!(outcome(&document(&genesis, &with_below, Some((n + 1, head)))), (Broken, vec!["link_break", "root_missing"], Some(Tail::Anchored)));
+}
+
+/// Every record-form negative vector, put in place of the chain record with its
+/// `seq` inside the whole chain, breaks the chain with its own violation at that
+/// record, and with a link_break at the next record exactly when its stored hash
+/// is a string other than the chain's: the walk advances from the stored hash.
+#[test]
+fn every_record_negative_breaks_the_chain_in_place() {
+    let d = file();
+    let records = chain_records(&d);
+    let genesis = chain_genesis(&d);
+    let head = d["chain"]["head_hash"].as_str().unwrap();
+    let mut seen = 0;
+    for nv in negatives(&d).iter().filter(|nv| nv.get("record").is_some()) {
+        let name = nv["name"].as_str().unwrap();
+        let rec = &nv["record"];
+        let seq = rec["seq"].as_u64().unwrap() as usize;
+        let mut chain = records.clone();
+        chain[seq] = rec.clone();
+        let report = walk(&document(&genesis, &chain, Some((CHAIN as u64, head))));
+        let mut want = vec![(Some(seq), nv["violation"].as_str().unwrap())];
+        if rec["hash"].is_string() && rec["hash"] != records[seq]["hash"] {
+            want.push((Some(seq + 1), "link_break"));
+        }
+        let got: Vec<(Option<usize>, &str)> = report.findings.iter().map(|f| (f.record, f.code)).collect();
+        assert_eq!(report.verdict, voaf::Verdict::Broken, "{}", name);
+        assert_eq!(got, want, "{}", name);
+        seen += 1;
+    }
+    assert_eq!(seen, 15, "record-form negative vectors");
+}
+
+/// Section 7's format check and member check, which reject a document before
+/// any record is walked.
+#[test]
+fn the_declared_format_and_the_members_are_checked() {
+    use voaf::Verdict::*;
+    let d = file();
+    let genesis = chain_genesis(&d);
+    let rec0 = chain_records(&d).remove(0);
+    let one = document(&genesis, &[rec0.clone()], Some((1, rec0["hash"].as_str().unwrap())));
+    let outcome = |doc: &Value| {
+        let r = walk(doc);
+        (r.verdict, r.codes())
+    };
+    let with = |member: &str, v: Value| {
+        let mut doc = one.clone();
+        doc[member] = v;
+        doc
+    };
+    let without = |member: &str| {
+        let mut doc = one.clone();
+        doc.as_object_mut().unwrap().remove(member);
+        doc
+    };
+    assert_eq!(outcome(&one), (Verified, vec![]));
+    for ok in ["2", "2.0", "2.1.0", "2.99.0"] {
+        assert_eq!(outcome(&with("voaf_version", ok.into())), (Verified, vec![]), "{}", ok);
+    }
+    for bad in [Value::Null, 2.into(), 2.0.into(), "".into(), "3.0".into(), "voaf-2.0".into(), "2.".into(), ".2".into(), "2..0".into(), "02.0".into(), "2.0 ".into(), "\u{ff12}.0".into(), serde_json::json!(["2.0"])] {
+        assert_eq!(outcome(&with("voaf_version", bad.clone())), (Rejected, vec!["unrecognised_format"]), "{}", bad);
+    }
+    assert_eq!(outcome(&without("voaf_version")), (Rejected, vec!["unrecognised_format"]));
+    assert_eq!(outcome(&with("voaf_version", "1.0".into())), (Rejected, vec!["format_mismatch"]));
+    assert_eq!(outcome(&serde_json::json!("2.0")), (Rejected, vec!["unrecognised_format"]));
+    // The array of entries is 1.0's shape only.
+    assert_eq!(walk(&serde_json::json!([{"voaf": "1.0.0", "id": "e1"}])).verdict, Version1);
+    assert_eq!(outcome(&serde_json::json!([{"voaf": "1.0.0"}, {"voaf": "2.0"}])), (Rejected, vec!["unrecognised_format"]));
+    assert_eq!(outcome(&serde_json::json!([{"voaf": "1.0.0"}, 5])), (Rejected, vec!["unrecognised_format"]));
+
+    assert_eq!(outcome(&without("records")), (Rejected, vec!["missing_member"]));
+    assert_eq!(outcome(&without("genesis")), (Rejected, vec!["missing_member"]));
+    // A member written as null counts as absent.
+    assert_eq!(outcome(&with("records", Value::Null)), (Rejected, vec!["missing_member"]));
+    assert_eq!(outcome(&with("genesis", Value::Null)), (Rejected, vec!["missing_member"]));
+    for (member, bad) in [("records", serde_json::json!({})), ("records", "[]".into()), ("genesis", 5.into()), ("genesis", serde_json::json!([]))] {
+        assert_eq!(outcome(&with(member, bad.clone())), (Rejected, vec!["malformed_member"]), "{} {}", member, bad);
+    }
+    // An anchor whose entry_count cannot be read is no anchor: the verdict
+    // stands, and the tail cannot be checked. Vigil 2.3.2 writes
+    // {"unreadable": true}.
+    for bad in [
+        serde_json::json!({"unreadable": true}),
+        serde_json::json!([]),
+        "1".into(),
+        serde_json::json!({"head_hash": "h"}),
+        serde_json::json!({"entry_count": null, "head_hash": "h"}),
+        serde_json::json!({"entry_count": -1, "head_hash": "h"}),
+        serde_json::json!({"entry_count": 1.5, "head_hash": "h"}),
+        serde_json::json!({"entry_count": "1", "head_hash": "h"}),
+    ] {
+        let r = walk(&with("anchor", bad.clone()));
+        assert_eq!((r.verdict, r.codes(), r.tail), (Verified, vec![], Some(voaf::Tail::Undetectable)), "{}", bad);
+    }
+    // One with a count and no head_hash is checked for its count alone.
+    for count_only in [serde_json::json!({"entry_count": 1}), serde_json::json!({"entry_count": 1, "head_hash": null})] {
+        let r = walk(&with("anchor", count_only.clone()));
+        assert_eq!((r.verdict, r.codes(), r.tail), (Verified, vec![], None), "{}", count_only);
+    }
+    assert_eq!(outcome(&with("anchor", serde_json::json!({"entry_count": 2}))), (Truncated, vec!["anchor_exceeds_records"]));
+    let r = walk(&with("anchor", serde_json::json!({"entry_count": 1.0, "head_hash": rec0["hash"]})));
+    assert_eq!((r.verdict, r.tail), (Verified, Some(voaf::Tail::Anchored)));
+    // A top-level member section 7 does not read is ignored, whatever its name.
+    assert_eq!(outcome(&with("$serde_json::private::Number", "1".into())), (Verified, vec![]));
+    assert_eq!(voaf::verify_document("{\"voaf_version\": ").codes(), vec!["invalid_json"]);
+    assert_eq!(voaf::verify_document("{\"records\": [], \"records\": []}").codes(), vec!["duplicate_member"]);
+}
+
+/// A record that does not decode is a rule 1 or rule 2 failure, and the chain
+/// is broken: a NULL `hash` or `event_kind` is `null_field`, and a record that is
+/// not an object is `wrong_type`.
+#[test]
+fn a_record_that_does_not_decode_breaks_the_chain() {
+    let d = file();
+    let records = chain_records(&d);
+    let genesis = chain_genesis(&d);
+    let head = d["chain"]["head_hash"].as_str().unwrap();
+    let codes_with = |seq: usize, member: &str, v: Value| {
+        let mut chain = records.clone();
+        chain[seq][member] = v;
+        let r = walk(&document(&genesis, &chain, Some((CHAIN as u64, head))));
+        assert_eq!(r.verdict, voaf::Verdict::Broken, "{} {}", seq, member);
+        r.codes()
+    };
+    assert_eq!(codes_with(1, "hash", Value::Null), vec!["null_field"]);
+    assert_eq!(codes_with(1, "event_kind", Value::Null), vec!["null_field"]);
+    assert_eq!(codes_with(1, "features_canonical", Value::from(vec![0; 26])), vec!["feature_arity"]);
+    assert_eq!(codes_with(1, "event_kind", "interaction_v3".into()), vec!["unknown_kind"]);
+    assert_eq!(codes_with(0, "event_kind", "chain_upgrade_v3".into()), vec!["root_not_chain_upgrade", "unknown_kind"]);
+    let mut chain = records.clone();
+    chain[5] = 5.into();
+    let r = walk(&document(&genesis, &chain, Some((CHAIN as u64, head))));
+    assert_eq!((r.verdict, r.codes()), (voaf::Verdict::Broken, vec!["link_break", "seq_gap", "wrong_type"]));
 }
