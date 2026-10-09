@@ -1,6 +1,6 @@
-# VOAF — Vigil Open Audit Format
+# VOAF: Vigil Open Audit Format
 
-**Version 2.0.0** | [Preimage spec](spec/2.0/preimage.md) | [Test vectors](spec/2.0/test-vectors.json) | [Changelog](CHANGELOG.md)
+**Version 2.1.0** | [Preimage spec](spec/2.0/preimage.md) | [Test vectors](spec/2.0/test-vectors.json) | [Changelog](CHANGELOG.md)
 
 > **2.0 covers message content. 1.0 did not.**
 > The 1.0 preimage hashed `prev_hash || id || timestamp || features_json`, so a
@@ -8,7 +8,7 @@
 > reads a 1.0 document in link-only mode and says so rather than reporting it as
 > verified. See the [changelog](CHANGELOG.md) for the full account.
 
-VOAF is an open, vendor-neutral JSON format for recording AI interaction audit trails. It provides a cryptographically verifiable, append-only log of every request and response between humans and AI systems — including metadata for policy decisions, anomaly flags, and blocked interactions.
+VOAF is an open, vendor-neutral JSON format for recording AI interaction audit trails. It provides a cryptographically verifiable, append-only log of every request and response between humans and AI systems, including metadata for policy decisions, anomaly flags, and blocked interactions.
 
 ## Why VOAF?
 
@@ -28,7 +28,7 @@ VOAF solves this with a minimal, well-defined JSON schema that any proxy, gatewa
 | **Append-only hash chain** | Each entry includes a SHA-256 hash of the previous entry, forming a tamper-evident chain |
 | **Provider-agnostic** | Works with OpenAI, Anthropic, Google, Cohere, open-source models, or any HTTP-based AI API |
 | **Gate decisions included** | `ALLOW`, `BLOCK`, and `FLAG` decisions are first-class fields, not afterthoughts |
-| **Minimal required fields** | Only 8 required fields per entry — everything else is optional extensions |
+| **Minimal required fields** | Only 8 required fields per entry; everything else is an optional extension |
 | **Streaming-friendly** | Entries can be written as each interaction completes; no need to buffer an entire session |
 
 ## Quick Start
@@ -105,7 +105,12 @@ check-jsonschema --schemafile schema/voaf-v1.0.schema.json your-audit.voaf.json
 
 ## Hash Chain Verification
 
-The chain is verified by recomputing each entry's expected `prev_hash`:
+This section describes VOAF 1.0, which the entries and schema above define. A
+1.0 chain covers each entry's linkage, not what a 2.x record said. For 2.x, the
+[preimage spec](spec/2.0/preimage.md) supersedes it: section 2 defines the bytes
+each record hash covers and section 7 how a verifier walks a document.
+
+The 1.0 chain is verified by recomputing each entry's expected `prev_hash`:
 
 ```
 entry[0].prev_hash == sha256:0000...0000  (genesis)
@@ -128,7 +133,7 @@ Canonical JSON is produced by serializing with sorted keys and no whitespace. An
 
 | Project | Language | Description |
 |---|---|---|
-| [Vigil](https://github.com/dip-vigilsec/vigil) | Rust | Reference implementation — local AI security proxy with native VOAF export |
+| [Vigil](https://github.com/dip-vigilsec/vigil) | Rust | Reference implementation: a local AI security proxy with native VOAF export |
 
 Want to add your implementation? Open a PR.
 
@@ -138,7 +143,7 @@ We welcome contributions. Please see the [schema](schema/voaf-v1.0.schema.json) 
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ---
 

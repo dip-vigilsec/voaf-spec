@@ -1,0 +1,60 @@
+# Runs every vector in spec/2.0/test-vectors.json against the reference
+# verifier, and against conformance-py, an independent Python verifier written
+# from the spec text alone. No paths filter: a required check that never
+# reports would hold a pull request open forever.
+name: vectors
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-verifier:
+    name: reference verifier, every vector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: cargo --version && rustc --version
+      - name: Run every vector
+        working-directory: verifier
+        run: |
+          set -o pipefail
+          cargo test --locked --test vectors 2>&1 | tee "$RUNNER_TEMP/vectors.log"
+      # The tests pin the vector counts. This pins the test count, so a test
+      # that is removed, ignored or filtered cannot pass by not running.
+      - name: Every test ran
+        run: |
+          grep -E '^test result: ok\. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$RUNNER_TEMP/vectors.log"
+
+  conformance-py:
+    name: conformance-py, Python 3.9.6, every vector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Python 3.9.6, the interpreter it was written and tested on, pinned by
+    # running in the official image of that exact release, by digest.
+    container:
+      image: python@sha256:28bed4c51c3b531159d8affc0225701edb16a7deacfdfdfb220a944405c39314 # 3.9.6-slim-buster
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Python is 3.9.6
+        run: python -c 'import sys; print(sys.version); assert sys.version_info[:3] == (3, 9, 6)'
+      # The three files are the isolated session's, copied unchanged.
+      - name: Files unchanged
+        working-directory: conformance-py
+        run: sha256sum -c SHA256SUMS
+      # run_vectors.py reads spec/2.0/test-vectors.json relative to its own
+      # directory, not the working directory, so link the repository's spec/.
+      - name: Point it at the repository's vectors
+        run: ln -s ../spec conformance-py/spec
+      - name: Run every vector
+        run: python conformance-py/run_vectors.py
