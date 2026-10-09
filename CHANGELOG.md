@@ -15,20 +15,21 @@ carry members or content no record hash covers, or break a rule 2.0.0 already
 stated: the section 4 nullability column, a declared field being present
 (2.0.0's rule 1 failed a field that does not decode, and its reference verifier
 rejected a missing one but not a NULL in a body field), the 1.0 schema, `seq`
-being unique and gapless, and the anchor's definition. One exception: 2.1.0
-states the four document members a verifier reads, which 2.0.0 left to an
-unpublished format, and rejects a document without `records` or `genesis`, with
-either of the wrong type, or without a declared version it recognises. Vigil
-2.3.2's export of a store with no records and no genesis is such a document;
-2.0.0 reported it `empty`. Members outside the records stay outside every hash,
-and a top-level member a verifier does not read is ignored. Every document a 2.0
-producer actually emitted with records still verifies, and every 2.0.0 vector
-and the chain reproduce unchanged. Known producer deviation: Vigil 2.3.0 and
-2.3.1 record producer denials as `user_deny`, so a `user_deny` from those
-releases does not prove a person decided (appendix A.4). One passage of 2.0.0
-described `client_disconnected` more broadly than any producer wrote it; it is
-corrected as an erratum, below. Section 7.1 states the rule that makes such a
-release minor.
+being unique and gapless, and the anchor's definition. Two kinds of document
+fall outside those grounds: a 2.x document without a `records` array, and one
+without a declared version 2.1.0 recognises. 2.0.0 did not fail either, since it
+named neither member and left the document members to an unpublished format, and
+no 2.0 producer emitted either. A document with records and no genesis string is
+rejected, and 2.0.0 could not verify it either; with zero records the genesis is
+not read. Members outside the records stay outside every hash, and a top-level
+member a verifier does not read is ignored. Every document a 2.0 producer
+emitted from an intact store still verifies, or, with zero records, still
+reports `empty`, and every 2.0.0 vector and the chain reproduce unchanged. Known
+producer deviation: Vigil 2.3.0 and 2.3.1 record producer denials as
+`user_deny`, so a `user_deny` from those releases does not prove a person
+decided (appendix A.4). One passage of 2.0.0 described `client_disconnected`
+more broadly than any producer wrote it; it is corrected as an erratum, below.
+Section 7.1 states the rule that makes such a release minor.
 
 
 ### Security
@@ -106,8 +107,13 @@ release minor.
   - the chain checks, each with a code. A duplicate `seq` is `broken`. A `seq`
     gap whose links hold is `truncated`, and so is record 0 missing, not a
     `chain_upgrade`, or not linked to the genesis;
+  - `genesis` required when `records` holds a record, and not read when it
+    holds none;
   - the carried anchor checked against the records, with an unanchored tail, or
-    a tail whose truncation cannot be detected, reported;
+    a tail whose truncation cannot be detected, reported. An absent, null or
+    unreadable anchor gives the verdict of no anchor, and the report says which
+    with an informational code, `anchor_absent`, `anchor_null` or
+    `anchor_unreadable`, that changes no verdict;
   - a code and a verdict for every check, in one table, and the precedence
     `broken`, then `truncated`.
 - Section 7 rule 2: a verifier MUST NOT count or present a record whose
@@ -140,12 +146,15 @@ release minor.
   Every record-form negative carries its stored hash as `hash`.
   `neg_field_over_limit` carries its 1,048,577-byte value literally, so the file
   is now about 1.2 MB.
-- Nine negative documents, `negative_documents`, each naming its verdict and
+- Thirteen negative documents, `negative_documents`, each naming its verdict and
   codes: a middle record deleted, a `seq` gap re-linked, record 0 not a
   `chain_upgrade`, an anchor counting more records than the document holds, an
-  anchor head that does not match, a duplicate `seq`, two `records` members, and
-  a document without `voaf_version` or without `genesis`. 24 positive and 22
-  negative vectors and 9 negative documents in all.
+  anchor head that does not match, a duplicate `seq`, two `records` members, a
+  document without `voaf_version`, a record and no `genesis`, Vigil 2.3.2's
+  export of an empty store with `"genesis": null` (`empty`), records with a null
+  genesis (`rejected`), an anchor written `{"unreadable": true}` (`verified`,
+  with `anchor_unreadable`), and no anchor (`verified`, with `anchor_absent`).
+  24 positive and 22 negative vectors and 13 negative documents in all.
 - `verifier/`: builds `spec/2.0/reference-verifier.rs` as a library and runs
   every vector against it, with the vector, negative, document and chain counts
   pinned. For every negative it also shows that a reader without the failing
@@ -242,20 +251,21 @@ release minor.
   a document, a `hash` that is not a string, a 1.x declaration on a document with
   2.x-only structure, a 1.0 array of entries in which an entry does not declare
   1.x, a NULL the section 4 tables forbid, a carried anchor whose `head_hash` is
-  not the stored hash of the record it counts to, and a document without
-  `records` or `genesis`, with either of the wrong type, or without a declared
-  version section 7 recognises. Section 2.2 already
+  not the stored hash of the record it counts to, a 2.x document without a
+  `records` array, and a document without a declared version section 7
+  recognises. Section 2.2 already
   made any field outside a kind's list a new tag, section 4.2.1 already confined
   the directive to the vectors file, and rule 1 already made a nullability
-  violation a failure. Vigil's exporter writes none of them in an export with
-  records, and a real 2.0 export from Vigil 2.3.2 verifies under 2.1.0's
-  reference verifier. It refuses to export records without a genesis, but exports
-  a store with no records and no genesis as `"genesis": null`, which 2.1.0
-  rejects (`missing_member`) where 2.0.0 reported it `empty`.
+  violation a failure. Vigil's 2.0 exporter writes none of them, and a real 2.0
+  export from Vigil 2.3.2 verifies under 2.1.0's reference verifier. It refuses
+  to export records without a genesis, and it exports a store with no records
+  and no genesis as `"genesis": null`, which reports `empty`, or `truncated`
+  when its anchor counts records, as under 2.0.0.
 - The reference verifier's interface changed: `schema()` returns the Nullable
   column as a third element, `preimage()` no longer expands `$repeat`,
   `expand_vector_record()` takes the kind, and `record()`, `parse_document()`,
-  `document_format()`, `verify_document()` and `PreimageError::code()` are new.
+  `document_format()`, `verify_document()`, `informational()` and
+  `PreimageError::code()` are new.
 
 ## [2.0.0] - 2026-09-02
 

@@ -626,40 +626,64 @@ pub fn document_format(doc: &Value) -> R<Format> {
 /// other top-level member is ignored.
 struct Members<'a> {
     records: &'a [Value],
-    genesis: &'a str,
-    /// `entry_count`, and `head_hash` when it is a string.
-    anchor: Option<(u64, Option<&'a str>)>,
+    /// Read only when `records` holds a record.
+    genesis: Option<&'a str>,
+    anchor: Anchor<'a>,
 }
 
-/// Section 7: `records` an array and `genesis` a string, both required, and either
-/// written as null counts as absent. The anchor's `entry_count` is read when it is
-/// a JSON number whose value is a non-negative integer, in any notation, and its
+/// What a document carries as its anchor. Section 7 gives the first three one
+/// verdict, no anchor, and each its own informational code.
+enum Anchor<'a> {
+    /// No `anchor` member (`anchor_absent`).
+    Absent,
+    /// `"anchor": null` (`anchor_null`).
+    Null,
+    /// An `anchor` whose `entry_count` cannot be read (`anchor_unreadable`), as
+    /// Vigil 2.3.2's `{"unreadable": true}`.
+    Unreadable,
+    /// `entry_count`, and `head_hash` when it is a string.
+    Read(u64, Option<&'a str>),
+}
+
+/// Section 7: `records` an array, required, and `genesis` a string, required when
+/// `records` holds a record and not read when it holds none; either written as
+/// null counts as absent. The anchor's `entry_count` is read when it is a JSON
+/// number whose value is a non-negative integer, in any notation, and its
 /// `head_hash` when it is a string. An anchor whose `entry_count` cannot be read
-/// is no anchor, as are null and Vigil 2.3.2's `{"unreadable": true}`, and
-/// members of it other than those two, Vigil's `generation` among them, are
-/// ignored.
+/// is unreadable, as is Vigil 2.3.2's `{"unreadable": true}`, and members of the
+/// anchor other than those two, Vigil's `generation` among them, are ignored.
 fn members(doc: &Value) -> R<Members<'_>> {
     let records = match doc.get("records") {
         None | Some(Value::Null) => return Err(PreimageError::MissingMember("records")),
         Some(Value::Array(r)) => r.as_slice(),
         Some(_) => return Err(PreimageError::MalformedMember("records")),
     };
+    // Only record 0 reads the genesis, so with zero records it is not read.
     let genesis = match doc.get("genesis") {
+        _ if records.is_empty() => None,
         None | Some(Value::Null) => return Err(PreimageError::MissingMember("genesis")),
-        Some(Value::String(g)) => g.as_str(),
+        Some(Value::String(g)) => Some(g.as_str()),
         Some(_) => return Err(PreimageError::MalformedMember("genesis")),
     };
-    let anchor = doc.get("anchor").and_then(|a| {
-        let n = a.get("entry_count")?;
-        // 13, 13.0 and 1.3e1 are one count, and -0 is 0. serde_json reads an
-        // integer of 2^64 or more as a float; it counts more records than any
-        // document holds, so it exceeds the record count.
-        let count = n.as_u64().or_else(|| {
-            let f = n.as_f64().filter(|f| *f >= 0.0 && f.fract() == 0.0)?;
-            Some(if f >= 18_446_744_073_709_551_616.0 { u64::MAX } else { f as u64 })
-        })?;
-        Some((count, a.get("head_hash").and_then(Value::as_str)))
-    });
+    let anchor = match doc.get("anchor") {
+        None => Anchor::Absent,
+        Some(Value::Null) => Anchor::Null,
+        Some(a) => {
+            // 13, 13.0 and 1.3e1 are one count, and -0 is 0. serde_json reads an
+            // integer of 2^64 or more as a float; it counts more records than any
+            // document holds, so it exceeds the record count.
+            let count = a.get("entry_count").and_then(|n| {
+                n.as_u64().or_else(|| {
+                    let f = n.as_f64().filter(|f| *f >= 0.0 && f.fract() == 0.0)?;
+                    Some(if f >= 18_446_744_073_709_551_616.0 { u64::MAX } else { f as u64 })
+                })
+            });
+            match count {
+                Some(count) => Anchor::Read(count, a.get("head_hash").and_then(Value::as_str)),
+                None => Anchor::Unreadable,
+            }
+        }
+    };
     Ok(Members { records, genesis, anchor })
 }
 
@@ -711,7 +735,8 @@ pub enum Tail {
     Undetectable,
 }
 
-/// One failed check, by its section 7 code.
+/// One finding, by its section 7 code: a failed check, or one of the
+/// informational anchor codes, which change no verdict.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     /// The record's position in the document's `records` array, or None for a
@@ -722,7 +747,8 @@ pub struct Finding {
 
 pub struct Report {
     pub verdict: Verdict,
-    /// Every finding, whichever verdict wins.
+    /// Every finding, whichever verdict wins, the informational anchor codes
+    /// included.
     pub findings: Vec<Finding>,
     /// None when the document was not walked, when it has zero records and an
     /// anchor counting none, and when the anchor counts more records than the
@@ -741,10 +767,15 @@ impl Report {
     }
 }
 
-/// The section 7 codes that make a walked chain `truncated`. Every other code a
-/// walk reports makes it `broken`.
+/// The section 7 codes that make a walked chain `truncated`.
 fn truncates(code: &str) -> bool {
     matches!(code, "root_missing" | "root_not_chain_upgrade" | "root_genesis_mismatch" | "seq_gap" | "anchor_exceeds_records")
+}
+
+/// The informational codes, which say what the document carried as its anchor
+/// and change no verdict. Every other code a walk reports makes it `broken`.
+pub fn informational(code: &str) -> bool {
+    matches!(code, "anchor_absent" | "anchor_null" | "anchor_unreadable")
 }
 
 fn rejected(code: &'static str) -> Report {
@@ -818,7 +849,7 @@ pub fn verify_document(text: &str) -> Report {
                 if str_of(i, "event_kind").is_some_and(|k| k != "chain_upgrade") {
                     found(i, "root_not_chain_upgrade");
                 }
-                if str_of(i, "prev_hash").is_some_and(|p| p != m.genesis) {
+                if str_of(i, "prev_hash").is_some_and(|p| Some(p) != m.genesis) {
                     found(i, "root_genesis_mismatch");
                 }
             }
@@ -843,16 +874,26 @@ pub fn verify_document(text: &str) -> Report {
 
     // The carried anchor. The record count is the length of `records`.
     let n = m.records.len() as u64;
-    let tail = match m.anchor {
-        None => Some(Tail::Undetectable),
-        Some((count, _)) if count > n => {
+    let carried = match m.anchor {
+        Anchor::Absent => Err("anchor_absent"),
+        Anchor::Null => Err("anchor_null"),
+        Anchor::Unreadable => Err("anchor_unreadable"),
+        Anchor::Read(count, head) => Ok((count, head)),
+    };
+    let tail = match carried {
+        // No anchor the verdict can use, and the report says which kind.
+        Err(code) => {
+            findings.push(Finding { record: None, code });
+            Some(Tail::Undetectable)
+        }
+        Ok((count, _)) if count > n => {
             findings.push(Finding { record: None, code: "anchor_exceeds_records" });
             None
         }
-        Some((0, _)) if n == 0 => None,
-        Some((0, _)) => Some(Tail::Undetectable),
-        Some((_, None)) => None,
-        Some((count, Some(head))) => {
+        Ok((0, _)) if n == 0 => None,
+        Ok((0, _)) => Some(Tail::Undetectable),
+        Ok((_, None)) => None,
+        Ok((count, Some(head))) => {
             // The record at position count - 1 of the walk, counting from 0; where
             // several records share its `seq`, any of them.
             match walk.get((count - 1) as usize) {
@@ -875,9 +916,9 @@ pub fn verify_document(text: &str) -> Report {
         }
     };
 
-    let verdict = if findings.iter().any(|f| !truncates(f.code)) {
+    let verdict = if findings.iter().any(|f| !truncates(f.code) && !informational(f.code)) {
         Verdict::Broken
-    } else if !findings.is_empty() {
+    } else if findings.iter().any(|f| truncates(f.code)) {
         Verdict::Truncated
     } else if n == 0 {
         Verdict::Empty

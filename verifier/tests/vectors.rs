@@ -13,7 +13,7 @@ const SPEC: &str = include_str!("../../spec/2.0/preimage.md");
 
 const POSITIVE: usize = 24;
 const NEGATIVE: usize = 22;
-const NEGATIVE_DOCUMENTS: usize = 9;
+const NEGATIVE_DOCUMENTS: usize = 13;
 const CHAIN: usize = 13;
 
 fn file() -> Value {
@@ -502,12 +502,16 @@ fn section_7_codes() -> Vec<(&'static str, &'static str)> {
 
 /// Every code the vectors file names is a row of the section 7 code table, and
 /// each negative document's verdict is the one its codes carry: `rejected` if
-/// any code is, otherwise `broken` if any is, otherwise `truncated`.
+/// any code is, otherwise `broken` if any is, otherwise `truncated`, and with
+/// only informational codes `empty` or `verified`.
 #[test]
 fn every_code_a_vector_names_is_a_section_7_code() {
     let d = file();
     let table = section_7_codes();
-    assert_eq!(table.len(), 23, "section 7 code table rows");
+    assert_eq!(table.len(), 26, "section 7 code table rows");
+    for (code, verdict) in &table {
+        assert_eq!(voaf::informational(code), *verdict == "none (informational)", "{}", code);
+    }
     let verdict_of = |code: &str| table.iter().find(|(c, _)| *c == code).unwrap_or_else(|| panic!("section 7 does not give {}", code)).1;
     for nv in negatives(&d) {
         for c in nv.get("violation").into_iter().chain(nv.get("acceptable_violations").and_then(Value::as_array).into_iter().flatten()) {
@@ -516,8 +520,11 @@ fn every_code_a_vector_names_is_a_section_7_code() {
     }
     for nd in negative_documents(&d) {
         let verdicts: Vec<&str> = nd["expected_codes"].as_array().unwrap().iter().map(|c| verdict_of(c.as_str().unwrap())).collect();
-        let want = ["rejected", "broken", "truncated"].into_iter().find(|v| verdicts.contains(v)).expect("a negative document names a code");
-        assert_eq!(nd["expected_verdict"].as_str().unwrap(), want, "{}", nd["name"]);
+        let got = nd["expected_verdict"].as_str().unwrap();
+        match ["rejected", "broken", "truncated"].into_iter().find(|v| verdicts.contains(v)) {
+            Some(want) => assert_eq!(got, want, "{}", nd["name"]),
+            None => assert!(got == "empty" || got == "verified", "{}: {}", nd["name"], got),
+        }
     }
 }
 
@@ -600,10 +607,18 @@ fn the_chain_as_a_document_verifies_and_its_anchor_is_checked() {
     assert_eq!(outcome(&document(&genesis, &records, Some((n, head)))), (Verified, vec![], Some(Tail::Anchored)));
     // No anchor, a null one, or one that counts nothing: the verdict stands, and
     // the tail cannot be checked.
-    assert_eq!(outcome(&document(&genesis, &records, None)), (Verified, vec![], Some(Tail::Undetectable)));
+    // Each kind of missing anchor has its own informational code, which changes
+    // no verdict.
+    assert_eq!(outcome(&document(&genesis, &records, None)), (Verified, vec!["anchor_absent"], Some(Tail::Undetectable)));
     let mut null_anchor = document(&genesis, &records, None);
     null_anchor["anchor"] = Value::Null;
-    assert_eq!(outcome(&null_anchor), (Verified, vec![], Some(Tail::Undetectable)));
+    assert_eq!(outcome(&null_anchor), (Verified, vec!["anchor_null"], Some(Tail::Undetectable)));
+    let mut unreadable = document(&genesis, &records, None);
+    unreadable["anchor"] = serde_json::json!({"unreadable": true});
+    assert_eq!(outcome(&unreadable), (Verified, vec!["anchor_unreadable"], Some(Tail::Undetectable)));
+    let mut broken_and_absent = document(&genesis, &records[1..], None);
+    broken_and_absent["records"][0]["hash"] = "0".into();
+    assert_eq!(outcome(&broken_and_absent).0, Broken);
     assert_eq!(outcome(&document(&genesis, &records, Some((0, head)))), (Verified, vec![], Some(Tail::Undetectable)));
     // A matching head over fewer records leaves an unanchored tail.
     assert_eq!(outcome(&document(&genesis, &records, Some((n - 1, hash(11))))), (Verified, vec![], Some(Tail::Unanchored(1))));
@@ -643,7 +658,18 @@ fn the_chain_as_a_document_verifies_and_its_anchor_is_checked() {
     let r = voaf::verify_document(&huge);
     assert_eq!((r.verdict, r.codes()), (Truncated, vec!["anchor_exceeds_records"]));
     // Zero records. Without an anchor, truncation of the tail cannot be detected.
-    assert_eq!(outcome(&document(&genesis, &[], None)), (Empty, vec![], Some(Tail::Undetectable)));
+    assert_eq!(outcome(&document(&genesis, &[], None)), (Empty, vec!["anchor_absent"], Some(Tail::Undetectable)));
+    // With zero records the genesis is not read, whatever it holds.
+    for g in [Value::Null, 5.into()] {
+        let mut no_genesis = document(&genesis, &[], Some((0, head)));
+        no_genesis["genesis"] = g.clone();
+        assert_eq!(outcome(&no_genesis), (Empty, vec![], None), "{}", g);
+        no_genesis["anchor"]["entry_count"] = 1.into();
+        assert_eq!(outcome(&no_genesis), (Truncated, vec!["anchor_exceeds_records"], None), "{}", g);
+    }
+    let mut no_genesis = document(&genesis, &[], None);
+    no_genesis.as_object_mut().unwrap().remove("genesis");
+    assert_eq!(outcome(&no_genesis), (Empty, vec!["anchor_absent"], Some(Tail::Undetectable)));
     assert_eq!(outcome(&document(&genesis, &[], Some((0, head)))), (Empty, vec![], None));
     assert_eq!(outcome(&document(&genesis, &[], Some((1, head)))), (Truncated, vec!["anchor_exceeds_records"], None));
     // Record 0. The lowest record has no record before it, so rule 4 does not
@@ -732,9 +758,13 @@ fn the_declared_format_and_the_members_are_checked() {
 
     assert_eq!(outcome(&without("records")), (Rejected, vec!["missing_member"]));
     assert_eq!(outcome(&without("genesis")), (Rejected, vec!["missing_member"]));
-    // A member written as null counts as absent.
+    // A member written as null counts as absent. With a record, the genesis is
+    // required.
     assert_eq!(outcome(&with("records", Value::Null)), (Rejected, vec!["missing_member"]));
     assert_eq!(outcome(&with("genesis", Value::Null)), (Rejected, vec!["missing_member"]));
+    let mut unwalkable = with("genesis", Value::Null);
+    unwalkable["records"] = serde_json::json!([5]);
+    assert_eq!(outcome(&unwalkable), (Rejected, vec!["missing_member"]), "a record that does not decode is still a record");
     for (member, bad) in [("records", serde_json::json!({})), ("records", "[]".into()), ("genesis", 5.into()), ("genesis", serde_json::json!([]))] {
         assert_eq!(outcome(&with(member, bad.clone())), (Rejected, vec!["malformed_member"]), "{} {}", member, bad);
     }
@@ -752,7 +782,7 @@ fn the_declared_format_and_the_members_are_checked() {
         serde_json::json!({"entry_count": "1", "head_hash": "h"}),
     ] {
         let r = walk(&with("anchor", bad.clone()));
-        assert_eq!((r.verdict, r.codes(), r.tail), (Verified, vec![], Some(voaf::Tail::Undetectable)), "{}", bad);
+        assert_eq!((r.verdict, r.codes(), r.tail), (Verified, vec!["anchor_unreadable"], Some(voaf::Tail::Undetectable)), "{}", bad);
     }
     // One with a count and no head_hash is checked for its count alone.
     for count_only in [serde_json::json!({"entry_count": 1}), serde_json::json!({"entry_count": 1, "head_hash": null})] {
